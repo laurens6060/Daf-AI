@@ -39,7 +39,6 @@ Opent poort 8000 in de Windows firewall
 Start de server met Uvicorn
 
 Op Linux kan je rechtstreeks de server draaien:
-bash:
 python3 server.py
 
 
