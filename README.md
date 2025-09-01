@@ -23,12 +23,12 @@ De video wordt via WebRTC naar een lokale server gestuurd, waar YOLOv8 (Ultralyt
 
 ### Stappen
 1. **Clone de repository**
-   "git clone https://github.com/<jouw-username>/Daf-AI.git"
-   "cd Daf-AI"
+   ```bash
+   git clone https://github.com/<jouw-username>/Daf-AI.git
+   cd Daf-AI
    
 2. **Voer het installatiescript uit**
 Op Windows (PowerShell):
-Copy code
 pwsh ./run.ps1
 
 Dit script:
@@ -40,7 +40,6 @@ Start de server met Uvicorn
 
 Op Linux kan je rechtstreeks de server draaien:
 bash:
-Copy code
 python3 server.py
 
 
