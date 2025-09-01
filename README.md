@@ -46,13 +46,13 @@ python3 server.py
 Desktop viewer openen
 Ga in je browser naar:
 
-https://<lokaal-ip>:8000
+https://<jouw-ip>:8000
 (Vervang <lokaal-ip> door het IP-adres van je PC in je lokale netwerk, bv. 192.168.1.23.)
 
 Mobiel toestel verbinden
 Open in de browser van je smartphone:
 
-https://<lokaal-ip>:8000/sender
+https://<jouw-ip>:8000/sender
 Sta cameratoegang toe
 Klik op “Start stream to server”
 
