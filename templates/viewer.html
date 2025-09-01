@@ -4,28 +4,73 @@
   <meta charset="utf-8"/>
   <title>AI Viewer</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 16px; display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; }
-    img { width: 100%; border-radius: 12px; background: #000; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
-    th { background: #fafafa; position: sticky; top:0; }
+    /* ====== BASIS OPMAAK ====== */
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 16px;
+      display: grid;
+      grid-template-columns: 2fr 1fr; /* 2/3 deel video, 1/3 deel tabel */
+      gap: 16px;
+    }
+
+    /* Kaarten met border en afgeronde hoeken */
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    /* Videobeeld (komt van /video_feed) */
+    img {
+      width: 100%;
+      border-radius: 12px;
+      background: #000; /* zwart vlak zolang er nog geen beeld is */
+    }
+
+    /* Tabel voor detectieresultaten */
+    table {
+      width: 100%;
+      border-collapse: collapse; /* geen dubbele borders */
+    }
+
+    th, td {
+      padding: 8px;
+      border-bottom: 1px solid #eee;
+      text-align: left;
+    }
+
+    /* Koprij (blijft bovenaan plakken bij scrollen) */
+    th {
+      background: #fafafa;
+      position: sticky;
+      top: 0;
+    }
   </style>
 </head>
 <body>
+  <!-- Linkerkaart: live videobeeld -->
   <div class="card">
     <h2>Live Video</h2>
+    <!-- Het <img> element haalt continu JPEG-frames op via /video_feed -->
     <img id="video" src="/video_feed" alt="video">
   </div>
 
+  <!-- Rechterkaart: tabel met AI-detecties -->
   <div class="card">
     <h2>Detections</h2>
     <table>
-      <thead><tr><th>Label</th><th>Confidence</th></tr></thead>
-      <tbody id="detBody"><tr><td colspan="2">Waiting…</td></tr></tbody>
+      <!-- Koprij van de tabel -->
+      <thead>
+        <tr><th>Label</th><th>Confidence</th></tr>
+      </thead>
+      <!-- Body wordt dynamisch gevuld door viewer.js via WebSocket /ws -->
+      <tbody id="detBody">
+        <tr><td colspan="2">Waiting…</td></tr>
+      </tbody>
     </table>
   </div>
 
+  <!-- JavaScript die de WebSocket opent en de tabel bijwerkt -->
   <script src="/static/viewer.js"></script>
 </body>
 </html>

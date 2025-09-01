@@ -1,166 +1,232 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Phone Sender</title>
-  <style>
-    body { font-family: system-ui, sans-serif; padding: 12px; }
-    video { width: 100%; border-radius: 12px; background: #000; }
-    button { padding: 10px 16px; font-size: 16px; margin-top: 12px; }
-    #status { margin: 10px 0; padding: 8px; border-radius: 8px; background: #f6f6f6; }
-    .ok { color: #0a7d00; } .warn { color: #8a6d00; } .err { color: #a10000; }
-  </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Phone Sender</title>
+    <style>
+        /* ====== BASIS OPMAAK ====== */
+        body {
+            font-family: system-ui, sans-serif;
+            padding: 12px;
+        }
+        
+        /* Videovoorbeeld (preview van camera) */
+        video {
+            width: 100%;
+            border-radius: 12px;
+            background: #000; /* zwart als er nog geen stream is */
+        }
+        
+        /* Knoppenstijl */
+        button {
+            padding: 10px 16px;
+            font-size: 16px;
+            margin-top: 12px;
+        }
+        
+        /* Statusblok waar logberichten komen */
+        #status {
+            margin: 10px 0;
+            padding: 8px;
+            border-radius: 8px;
+            background: #f6f6f6;
+        }
+        
+        /* Kleuren voor logberichten */
+        .ok {
+            color: #0a7d00;
+        }
+        
+        .warn {
+            color: #8a6d00;
+        }
+        
+        .err {
+            color: #a10000;
+        }
+    </style>
 </head>
+
 <body>
-  <h2>Phone Camera Stream</h2>
+    <h2>Phone Camera Stream</h2>
 
-  <div id="status">Initializing…</div>
-  <video id="preview" autoplay playsinline muted></video>
-  <div>
-    <button id="reqBtn">Request camera</button>
-    <button id="startBtn">Start stream to server</button>
-  </div>
+    <!-- Statusmeldingen (worden dynamisch toegevoegd via log()) -->
+    <div id="status">Initializing…</div>
 
-  <script>
-    const statusEl = document.getElementById('status');
-    const reqBtn = document.getElementById('reqBtn');
-    const startBtn = document.getElementById('startBtn');
-    const videoEl = document.getElementById('preview');
+    <!-- Videovoorbeeld -->
+    <video id="preview" autoplay playsinline muted></video>
 
-    let localStream = null;
-    let pc = null;
+    <!-- Bediening: camera starten en streaming starten -->
+    <div>
+        <button id="reqBtn">Request camera</button>
+        <button id="startBtn">Start stream to server</button>
+    </div>
 
-    function log(msg, cls = '') {
-      statusEl.innerHTML = `<div class="${cls}">${msg}</div>` + statusEl.innerHTML;
-      console.log(msg);
-    }
+    <script>
+        // Referenties naar HTML-elementen
+        const statusEl = document.getElementById('status');
+        const reqBtn = document.getElementById('reqBtn');
+        const startBtn = document.getElementById('startBtn');
+        const videoEl = document.getElementById('preview');
 
-    function isIOS() {
-      return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    }
+        // Globale variabelen
+        let localStream = null; // de actieve camerastream
+        let pc = null;          // RTCPeerConnection voor WebRTC
 
-    async function diagnostics() {
-      log(`UserAgent: ${navigator.userAgent}`);
-      log(`isSecureContext: ${window.isSecureContext}`, window.isSecureContext ? 'ok' : 'warn');
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        log('mediaDevices/getUserMedia not available in this browser.', 'err');
-        return;
-      }
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const cams = devices.filter(d => d.kind === 'videoinput');
-        log(`Found ${cams.length} video input device(s).`, cams.length ? 'ok' : 'warn');
-      } catch (e) {
-        log(`enumerateDevices failed: ${e.message}`, 'warn');
-      }
-
-      if (!window.isSecureContext && isIOS()) {
-        log('Safari on iOS usually requires HTTPS for camera access. Use https or enable Media Capture in Experimental Features.', 'warn');
-      }
-    }
-
-    async function getCameraStream() {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        log('getUserMedia not supported.', 'err');
-        throw new Error('unsupported');
-      }
-
-      // Try rear camera first, then fallback to any camera
-      const tries = [
-        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
-        { video: true, audio: false }
-      ];
-
-      let lastErr = null;
-      for (const constraints of tries) {
-        try {
-          const s = await navigator.mediaDevices.getUserMedia(constraints);
-          return s;
-        } catch (e) {
-          lastErr = e;
-          log(`getUserMedia failed with ${JSON.stringify(constraints)}: ${e.name} - ${e.message}`, 'warn');
+        // ----------- Helper: logberichten in de statusdiv + console -----------
+        function log(msg, cls = '') {
+            statusEl.innerHTML = `<div class="${cls}">${msg}</div>` + statusEl.innerHTML;
+            console.log(msg);
         }
-      }
-      throw lastErr || new Error('getUserMedia failed');
-    }
 
-    function showStream(stream) {
-      localStream = stream;
-      videoEl.srcObject = stream;
-      log('Camera permission granted and preview started.', 'ok');
-    }
-
-    async function requestCamera() {
-      try {
-        const stream = await getCameraStream();
-        showStream(stream);
-      } catch (e) {
-        let hint = '';
-        if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
-          hint = ' (check site permissions for Camera and allow it)';
-        } else if (e.name === 'NotFoundError' || e.name === 'OverconstrainedError') {
-          hint = ' (no camera found or constraints not satisfied)';
+        // ----------- Helper: detecteer iOS (Safari op iPhone/iPad) -----------
+        function isIOS() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         }
-        log(`Camera access error: ${e.name} - ${e.message}${hint}`, 'err');
-        alert(`Camera access error: ${e.name}\n${e.message}\n${hint}`);
-      }
-    }
 
-    async function startStreaming() {
-      if (!localStream) {
-        log('No camera stream available. Trying to request it now…', 'warn');
-        await requestCamera();
-        if (!localStream) {
-          log('Still no camera stream. Cannot start.', 'err');
-          return;
+        // ----------- Diagnosefunctie: check of camera API beschikbaar is, enz. -----------
+        async function diagnostics() {
+            log(`UserAgent: ${navigator.userAgent}`);
+            log(`isSecureContext: ${window.isSecureContext}`, window.isSecureContext ? 'ok' : 'warn');
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                log('mediaDevices/getUserMedia niet beschikbaar in deze browser.', 'err');
+                return;
+            }
+
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const cams = devices.filter(d => d.kind === 'videoinput');
+                log(`Gevonden ${cams.length} camera('s).`, cams.length ? 'ok' : 'warn');
+            } catch (e) {
+                log(`enumerateDevices mislukt: ${e.message}`, 'warn');
+            }
+
+            if (!window.isSecureContext && isIOS()) {
+                log('Safari op iOS vereist meestal HTTPS voor camera-toegang. Gebruik https:// of zet Media Capture in Experimental Features aan.', 'warn');
+            }
         }
-      }
 
-      startBtn.disabled = true;
-      try {
-        pc = new RTCPeerConnection({
-          iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
+        // ----------- Vraag toegang tot camera (probeer eerst achtercamera) -----------
+        async function getCameraStream() {
+            if (!navigator.mediaDevices?.getUserMedia) {
+                log('getUserMedia niet ondersteund.', 'err');
+                throw new Error('unsupported');
+            }
+
+            // Eerst proberen: achtercamera, 1280x720
+            // Valt terug naar "any camera" als dat faalt
+            const tries = [{
+                video: {
+                    facingMode: { ideal: "environment" },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                },
+                audio: false
+            }, {
+                video: true,
+                audio: false
+            }];
+
+            let lastErr = null;
+            for (const constraints of tries) {
+                try {
+                    const s = await navigator.mediaDevices.getUserMedia(constraints);
+                    return s;
+                } catch (e) {
+                    lastErr = e;
+                    log(`getUserMedia faalde met ${JSON.stringify(constraints)}: ${e.name} - ${e.message}`, 'warn');
+                }
+            }
+            throw lastErr || new Error('getUserMedia failed');
+        }
+
+        // Toon camerastream in <video> en sla deze op in localStream
+        function showStream(stream) {
+            localStream = stream;
+            videoEl.srcObject = stream;
+            log('Camera-toestemming gegeven en preview gestart.', 'ok');
+        }
+
+        // ----------- Vraag camera op (kan door knop of automatisch) -----------
+        async function requestCamera() {
+            try {
+                const stream = await getCameraStream();
+                showStream(stream);
+            } catch (e) {
+                let hint = '';
+                if (e.name === 'NotAllowedError' || e.name === 'SecurityError') {
+                    hint = ' (controleer site-permissies voor Camera en sta toe)';
+                } else if (e.name === 'NotFoundError' || e.name === 'OverconstrainedError') {
+                    hint = ' (geen camera gevonden of constraints niet haalbaar)';
+                }
+                log(`Camera-toegang error: ${e.name} - ${e.message}${hint}`, 'err');
+                alert(`Camera-toegang error: ${e.name}\n${e.message}\n${hint}`);
+            }
+        }
+
+        // ----------- Start streaming via WebRTC naar de server -----------
+        async function startStreaming() {
+            if (!localStream) {
+                log('Geen camera-stream beschikbaar. Probeer nu te starten…', 'warn');
+                await requestCamera();
+                if (!localStream) {
+                    log('Nog steeds geen camera-stream. Kan niet starten.', 'err');
+                    return;
+                }
+            }
+
+            startBtn.disabled = true;
+            try {
+                // Maak een RTCPeerConnection aan (met publieke STUN-server)
+                pc = new RTCPeerConnection({
+                    iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
+                });
+
+                // Voeg cameratracks toe aan de verbinding
+                localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+                // Maak SDP-offer en stuur naar server (/offer)
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                const resp = await fetch("/offer", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        sdp: pc.localDescription.sdp,
+                        type: pc.localDescription.type
+                    })
+                });
+
+                if (!resp.ok) {
+                    const txt = await resp.text();
+                    throw new Error(`Server /offer error: ${resp.status} ${txt}`);
+                }
+
+                // Verwerk SDP-answer van server
+                const answer = await resp.json();
+                await pc.setRemoteDescription(answer);
+                log('Streaming gestart naar server.', 'ok');
+            } catch (e) {
+                startBtn.disabled = false;
+                log(`Stream starten mislukt: ${e.message}`, 'err');
+                alert(`Stream starten mislukt:\n${e.message}`);
+            }
+        }
+
+        // ----------- Events koppelen aan knoppen -----------
+        reqBtn.onclick = requestCamera;
+        startBtn.onclick = startStreaming;
+
+        // ----------- Bij laden van pagina: doe diagnostiek en probeer camera direct -----------
+        window.addEventListener('load', async() => {
+            await diagnostics();
+            await requestCamera(); // probeer direct toegang; user kan ook handmatig klikken
         });
-
-        localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        const resp = await fetch("/offer", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sdp: pc.localDescription.sdp,
-            type: pc.localDescription.type
-          })
-        });
-
-        if (!resp.ok) {
-          const txt = await resp.text();
-          throw new Error(`Server /offer error: ${resp.status} ${txt}`);
-        }
-
-        const answer = await resp.json();
-        await pc.setRemoteDescription(answer);
-        log('Streaming started to server.', 'ok');
-      } catch (e) {
-        startBtn.disabled = false;
-        log(`Start stream failed: ${e.message}`, 'err');
-        alert(`Start stream failed:\n${e.message}`);
-      }
-    }
-
-    // Wire up buttons
-    reqBtn.onclick = requestCamera;
-    startBtn.onclick = startStreaming;
-
-    // Auto-run on load: diagnostics + try to get camera once
-    window.addEventListener('load', async () => {
-      await diagnostics();
-      await requestCamera(); // try immediately; user can also press "Request camera" manually
-    });
-  </script>
+    </script>
 </body>
+
 </html>
