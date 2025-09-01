@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>AI Viewer</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; }
+    img { width: 100%; border-radius: 12px; background: #000; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
+    th { background: #fafafa; position: sticky; top:0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Live Video</h2>
+    <img id="video" src="/video_feed" alt="video">
+  </div>
+
+  <div class="card">
+    <h2>Detections</h2>
+    <table>
+      <thead><tr><th>Label</th><th>Confidence</th></tr></thead>
+      <tbody id="detBody"><tr><td colspan="2">Waiting…</td></tr></tbody>
+    </table>
+  </div>
+
+  <script src="/static/viewer.js"></script>
+</body>
+</html>
