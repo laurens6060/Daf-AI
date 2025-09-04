@@ -1,76 +1,289 @@
 <!DOCTYPE html>
-<html>
+<html lang="nl">
 <head>
   <meta charset="utf-8"/>
   <title>AI Viewer</title>
+
   <style>
-    /* ====== BASIS OPMAAK ====== */
+    /* ===============================
+       Layout & basis-styling
+       =============================== */
     body {
       font-family: system-ui, sans-serif;
       margin: 16px;
       display: grid;
-      grid-template-columns: 2fr 1fr; /* 2/3 deel video, 1/3 deel tabel */
+      grid-template-columns: 2fr 1fr; /* links: video, rechts: panel */
       gap: 16px;
     }
 
-    /* Kaarten met border en afgeronde hoeken */
     .card {
       border: 1px solid #ddd;
       border-radius: 12px;
       padding: 12px;
+      background: #fff;
     }
 
-    /* Videobeeld (komt van /video_feed) */
+    /* ===============================
+       Videobeeld (MJPEG <img>)
+       - Houd het beeld compacter met max-hoogte
+       - object-fit: contain toont alles zonder afsnijden
+       =============================== */
+    #video {
+      width: 100%;            /* vult de card-breedte */
+      max-height: 60vh;       /* beperk de hoogte; pas dit naar smaak aan (bijv. 480px) */
+      height: auto;           /* behoud aspect ratio */
+      border-radius: 12px;
+      background: #000;       /* zwarte achtergrond bij letterboxing */
+      display: block;
+      margin: 0 auto;         /* centreer binnen de card */
+      object-fit: contain;    /* toon volledige frame zonder croppen */
+    }
+
+    /* Algemene stijl voor afbeeldingen (indien elders gebruikt) */
     img {
       width: 100%;
       border-radius: 12px;
-      background: #000; /* zwart vlak zolang er nog geen beeld is */
+      background: #000;
+      display: block;
     }
 
-    /* Tabel voor detectieresultaten */
-    table {
-      width: 100%;
-      border-collapse: collapse; /* geen dubbele borders */
+    /* ===============================
+       Tabel voor detecties
+       =============================== */
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
+    th { background: #fafafa; position: sticky; top:0; }
+
+    /* ===============================
+       Control-panel (sliders/checkboxes)
+       =============================== */
+    .controls { margin-top: 12px; }
+    .controls label { display:block; margin-top: 10px; font-weight: 600; }
+    .row { display:flex; align-items:center; gap:8px; }
+    .value { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* "In beeld" teller (present) als mooie badges */
+    .pill {
+      display:inline-block;
+      background:#f2f2f2;
+      padding:4px 8px;
+      border-radius:999px;
+      margin:2px 4px 0 0;
     }
 
-    th, td {
-      padding: 8px;
-      border-bottom: 1px solid #eee;
-      text-align: left;
+    /* Raster met checkboxen voor klassen */
+    .class-grid {
+      display:grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap:4px 8px;
+      max-height: 220px;      /* scroll bij veel klassen */
+      overflow:auto;
+      border:1px solid #eee;
+      padding:8px;
+      border-radius:8px;
     }
+    .class-item { display:flex; align-items:center; gap:6px; }
 
-    /* Koprij (blijft bovenaan plakken bij scrollen) */
-    th {
-      background: #fafafa;
-      position: sticky;
-      top: 0;
+    /* Buttons */
+    .btn {
+      margin-top: 12px;
+      padding: 8px 12px;
+      border:1px solid #ccc;
+      border-radius:8px;
+      background:#fafafa;
+      cursor:pointer;
+    }
+    .btn:hover { background:#f0f0f0; }
+
+    /* ===============================
+       Help-modal (overlay)
+       =============================== */
+    .modal {
+      display: none;              /* standaard verborgen */
+      position: fixed;
+      z-index: 1000;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.6);  /* donkere overlay */
+    }
+    .modal-content {
+      background-color: #fff;
+      margin: 10% auto;
+      padding: 20px;
+      border-radius: 12px;
+      width: 80%;
+      max-width: 600px;
+    }
+    .close {
+      color: #aaa;
+      float: right;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .close:hover { color: #000; }
+
+    /* ===============================
+       Responsive gedrag:
+       - Op small screens stapelen we de columns onder elkaar
+       =============================== */
+    @media (max-width: 900px) {
+      body {
+        grid-template-columns: 1fr; /* video boven, controls onder */
+      }
+      #video {
+        max-height: 40vh;          /* wat kleiner op mobiel */
+      }
     }
   </style>
 </head>
+
 <body>
-  <!-- Linkerkaart: live videobeeld -->
+  <!-- ===============================
+       Linkerkolom: Live video
+       - Toont MJPEG-stream van /video_feed
+       =============================== -->
   <div class="card">
     <h2>Live Video</h2>
-    <!-- Het <img> element haalt continu JPEG-frames op via /video_feed -->
+    <!-- Het <img>-element dat de MJPEG-stream toont.
+         Wil je ‘m nog kleiner? Verlaag in CSS de max-height of zet een vaste height (bijv. 360px). -->
     <img id="video" src="/video_feed" alt="video">
   </div>
 
-  <!-- Rechterkaart: tabel met AI-detecties -->
+  <!-- ===============================
+       Rechterkolom: Controls, help, present teller, detectietabel
+       =============================== -->
   <div class="card">
-    <h2>Detections</h2>
+    <!-- Help-knop + modal met uitleg over alle instellingen -->
+    <button id="helpBtn" class="btn">ℹ️ Info</button>
+
+    <!-- Modal -->
+    <div id="helpModal" class="modal" aria-hidden="true" role="dialog" aria-labelledby="helpTitle">
+      <div class="modal-content">
+        <span id="closeModal" class="close" aria-label="Sluiten">&times;</span>
+        <h2 id="helpTitle">Uitleg instellingen</h2>
+
+        <p><strong>Confidence Threshold (conf)</strong><br>
+          Minimale zekerheid voordat een detectie wordt getoond.
+          Hoger = minder ruis, maar ook meer gemiste objecten.</p>
+
+        <p><strong>IoU Threshold (iou)</strong><br>
+          Intersection over Union. Bepaalt samenvoegen/onderdrukken van overlappende boxen.
+          Hoger = strenger, minder dubbele boxen, maar mogelijk te agressief.</p>
+
+        <p><strong>Image Size (imgsz)</strong><br>
+          Interne invoerresolutie van het model. Lager = sneller, hoger = preciezer (maar trager).</p>
+
+        <p><strong>Hold (ms)</strong><br>
+          Hoe lang (in milliseconden) een object zichtbaar blijft als het kort uit beeld is.
+          Verkleint “flikkeren” bij korte misses.</p>
+
+        <p><strong>Min Hits</strong><br>
+          Minimaal aantal opeenvolgende frames waarin een object gezien moet zijn voordat het wordt getekend.
+          Filtert losse, onbetrouwbare ‘blips’ weg.</p>
+
+        <p><strong>EMA α</strong><br>
+          Smoothing factor (0..1) voor boxpositie en confidence.
+          Lager = stabieler beeld, maar trager reagerend.</p>
+      </div>
+    </div>
+
+    <!-- ============== Instellingen (model/thresholds/imgsz) ============== -->
+    <h3 style="margin-top:16px;">Instellingen</h3>
+    <div class="controls">
+      <!-- Modelkeuze (server stuurt de lijst via /ws config) -->
+      <label>Model
+        <select id="modelSel"></select>
+      </label>
+
+      <!-- Confidence slider -->
+      <label>Confidence
+        <div class="row">
+          <input id="confInp" type="range" min="0" max="1" step="0.01" style="flex:1"/>
+          <span id="confVal" class="value">0.35</span>
+        </div>
+      </label>
+
+      <!-- IoU slider -->
+      <label>IoU
+        <div class="row">
+          <input id="iouInp" type="range" min="0" max="1" step="0.01" style="flex:1"/>
+          <span id="iouVal" class="value">0.45</span>
+        </div>
+      </label>
+
+      <!-- Invoerresolutie slider -->
+      <label>Input resolutie (imgsz)
+        <div class="row">
+          <input id="imgszInp" type="range" min="256" max="1280" step="32" style="flex:1"/>
+          <span id="imgszVal" class="value">640</span>
+        </div>
+      </label>
+
+      <!-- ============== Stabilisatie (tracking smoothing) ============== -->
+      <h3 style="margin-top:16px;">Stabilisatie</h3>
+
+      <label>Hold (ms)
+        <div class="row">
+          <input type="range" id="holdInp" min="100" max="2000" step="50" style="flex:1">
+          <span id="holdVal" class="value"></span>
+        </div>
+      </label>
+
+      <label>Min Hits
+        <div class="row">
+          <input type="range" id="hitsInp" min="1" max="10" step="1" style="flex:1">
+          <span id="hitsVal" class="value"></span>
+        </div>
+      </label>
+
+      <label>EMA α
+        <div class="row">
+          <input type="range" id="emaInp" min="0" max="1" step="0.05" style="flex:1">
+          <span id="emaVal" class="value"></span>
+        </div>
+      </label>
+
+      <button id="saveStab" class="btn">Save stabilisation</button>
+
+      <!-- ============== Klassenfilter (checkboxen) ============== -->
+      <label style="margin-top:16px;">Toegestane klassen</label>
+      <div id="classesBox" class="class-grid">
+        <!-- Wordt dynamisch gevuld via viewer.js met alle klassen uit het gekozen model -->
+      </div>
+
+      <!-- ============== Sticky seconden (alleen gebruiken als je “sticky” echt toepast) ============== -->
+      <!-- In jouw huidige implementatie gebruik je deze container voor "In beeld" (present).
+           De slider hieronder is optioneel; je kunt hem laten staan of verbergen. -->
+      <label style="margin-top:10px;">Sticky seconden
+        <div class="row">
+          <input id="stickyInp" type="range" min="1" max="60" step="1" style="flex:1"/>
+          <span id="stickyVal" class="value">8</span>
+        </div>
+      </label>
+
+      <!-- Actieknoppen voor het bewaren van instellingen en snel alle klassen aan/uit -->
+      <button id="saveBtn" class="btn">Instellingen opslaan</button>
+      <button id="allowAllBtn" class="btn">Alles toestaan</button>
+      <button id="clearAllBtn" class="btn">Alles uitzetten</button>
+
+      <!-- "In beeld" (present) teller: per label het huidige aantal objecten op dit moment -->
+      <h3 style="margin-top:16px;">In beeld</h3>
+      <div id="stickyBox">Nog geen data…</div>
+    </div>
+
+    <!-- ============== Tabel met live detecties (label + confidence) ============== -->
+    <h2 style="margin-top:16px;">Detections</h2>
     <table>
-      <!-- Koprij van de tabel -->
       <thead>
         <tr><th>Label</th><th>Confidence</th></tr>
       </thead>
-      <!-- Body wordt dynamisch gevuld door viewer.js via WebSocket /ws -->
-      <tbody id="detBody">
-        <tr><td colspan="2">Waiting…</td></tr>
-      </tbody>
+      <tbody id="detBody"><tr><td colspan="2">Waiting…</td></tr></tbody>
     </table>
   </div>
 
-  <!-- JavaScript die de WebSocket opent en de tabel bijwerkt -->
+  <!-- Koppel het gedrag (WebSocket, sliders, modal) -->
   <script src="/static/viewer.js"></script>
 </body>
 </html>
