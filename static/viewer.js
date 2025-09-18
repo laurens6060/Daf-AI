@@ -1,111 +1,242 @@
-// ===============================
-// viewer.js
-// ===============================
-// Taken van dit script:
-// - Opzetten van de WebSocket verbinding met de server (/ws)
-// - Ontvangen van configuratie en detectieresultaten
-// - UI updaten: tabel met detecties, "In beeld" teller, sliders, checkboxes, help-modal
-// - Versturen van nieuwe configuratie naar de server (/api/config)
-//
-// Let op: sommige UI-elementen (sliders, checkboxes, knoppen) zijn optioneel,
-// afhankelijk van of ze in viewer.html gedefinieerd zijn.
-// ===============================
-
 (function () {
-  // Element-referenties uit de DOM (HTML-pagina)
-  const tbody = document.getElementById("detBody");      // tabelbody waar detecties getoond worden
-  const stickyBox = document.getElementById("stickyBox"); // box waar we "In beeld" aantallen tonen
+  // ==========================
+  // DOM referenties (elementen uit de pagina)
+  // ==========================
+  const tbody = document.getElementById("detBody");      // Tabel met individuele detecties (label + confidence)
+  const stickyBox = document.getElementById("stickyBox"); // Badge-overzicht: “in beeld” (huidige aantallen per label)
 
-  // Optionele UI-elementen voor modelkeuze en sliders
+  // Besturingselementen (sliders, dropdowns, etc.) — sommige pagina’s hebben niet alles
   const modelSel  = document.getElementById("modelSel");
-  const confInp   = document.getElementById("confInp");
-  const confVal   = document.getElementById("confVal");
-  const iouInp    = document.getElementById("iouInp");
-  const iouVal    = document.getElementById("iouVal");
-  const imgszInp  = document.getElementById("imgszInp");
-  const imgszVal  = document.getElementById("imgszVal");
+  const confInp   = document.getElementById("confInp");   const confVal  = document.getElementById("confVal");
+  const iouInp    = document.getElementById("iouInp");    const iouVal   = document.getElementById("iouVal");
+  const imgszInp  = document.getElementById("imgszInp");  const imgszVal = document.getElementById("imgszVal");
+  const holdInp   = document.getElementById("holdInp");   const holdVal  = document.getElementById("holdVal");
+  const hitsInp   = document.getElementById("hitsInp");   const hitsVal  = document.getElementById("hitsVal");
+  const emaInp    = document.getElementById("emaInp");    const emaVal   = document.getElementById("emaVal");
   const classesBox = document.getElementById("classesBox");
-  const saveBtn   = document.getElementById("saveBtn");
+  const saveBtn    = document.getElementById("saveBtn");
   const allowAllBtn = document.getElementById("allowAllBtn");
   const clearAllBtn = document.getElementById("clearAllBtn");
+  const saveStabBtn = document.getElementById("saveStab");
 
-  // Modal (helpvenster met uitleg)
-  const helpBtn = document.getElementById("helpBtn");
-  const helpModal = document.getElementById("helpModal");
-  const closeModal = document.getElementById("closeModal");
+  // ID van de “actieve” order die we willen kleuren (blauw/rood/groen)
+  const ACTIVE_ORDER_ID = "156547";
 
-  // --- Event handlers voor help-modal ---
-  if (helpBtn) helpBtn.onclick = () => { helpModal.style.display = "block"; };
-  if (closeModal) closeModal.onclick = () => { helpModal.style.display = "none"; };
-  window.onclick = (event) => {
-    if (event.target === helpModal) {
-      helpModal.style.display = "none";
-    }
-  };
+  // Orders-tabel (rechter kolom)
+  const ordersBody = document.getElementById("ordersBody");
 
-  // --- Kleine helperfunctie om sliders live waarde te laten tonen ---
+  // ==========================
+  // Interne staat
+  // ==========================
+  let currentConfig = null;     // Laatst ontvangen config van de server (model, conf, iou, …)
+  let orders = [];              // Alle orders uit /mes/orders
+  let presentMap = {};          // “In beeld” aantallen per label, bv. { tv: 2, person: 1 }
+  const axleCache = new Map();  // Cache per as-type: typeCode -> { spec, subtypesByName }
+
+  // ==========================
+  // Kleine helpers
+  // ==========================
+  // Verbind slider met zichtbaar label (zodat waarde live mee verandert)
   const bindRange = (inp, label, fmt = (v)=>v) => {
     if (!inp || !label) return;
     const update = () => label.textContent = fmt(inp.value);
     inp.addEventListener("input", update);
     update();
   };
-  // Koppel sliders aan labels
-  bindRange(confInp, confVal, v => (+v).toFixed(2));
-  bindRange(iouInp,  iouVal,  v => (+v).toFixed(2));
-  bindRange(imgszInp,imgszVal, v => `${v}`);
+  bindRange(confInp,  confVal,  v => (+v).toFixed(2));
+  bindRange(iouInp,   iouVal,   v => (+v).toFixed(2));
+  bindRange(imgszInp, imgszVal, v => `${v}`);
+  bindRange(holdInp,  holdVal,  v => `${v} ms`);
+  bindRange(hitsInp,  hitsVal,  v => `${v}`);
+  bindRange(emaInp,   emaVal,   v => (+v).toFixed(2));
 
-  // --- WebSocket verbinding met server ---
-  // Gebruikt wss:// bij https, anders ws://
+  // HTTP hulpfuncties
+  async function GET(url){ return fetch(url).then(r=>r.json()); }
+  async function POST(url, body){
+    return fetch(url,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    }).then(r=>r.json());
+  }
+
+  // ==========================
+  // Orders ophalen en tekenen
+  // ==========================
+  async function loadOrders() {
+    if (!ordersBody) return; // als de kolom niet bestaat, sla over
+    orders = await GET('/mes/orders');
+
+    // Tabel leeg en opnieuw opbouwen
+    ordersBody.innerHTML = "";
+    for (const o of orders) {
+      const tr = document.createElement('tr');
+      tr.dataset.orderId = o.order_id; // nodig om later specifieke rij te kunnen kleuren
+      tr.innerHTML = `<td>${o.order_id}</td><td>${o.axle_type}</td><td>${o.axle_subtype}</td>`;
+      ordersBody.appendChild(tr);
+    }
+
+    // Voor alle type-codes in deze orders alvast de subtype-info cachen
+    await Promise.all([...new Set(orders.map(o => o.axle_type))].map(cacheAxleType));
+
+    // Eerste kleur-update (meestal “actief maar niks gezien” → blauw)
+    updateOrdersHighlight();
+  }
+
+  // Cache hulp: as-type info (properties + subtypes) één keer ophalen en bewaren
+  async function cacheAxleType(typeCode) {
+    if (axleCache.has(typeCode)) return;
+    const data = await GET(`/mes/axle-types/${encodeURIComponent(typeCode)}`);
+    const byName = new Map();
+    (data.subtypes || []).forEach(st => byName.set(String(st.name), st));
+    axleCache.set(typeCode, { spec: data.spec, subtypesByName: byName });
+  }
+
+  // ==========================
+  // Rijkleuren van de orders
+  // ==========================
+  // Regels:
+  // - Actieve order: blauw als er nog niets van de vereiste properties gezien is
+  // - Actieve order: groen als ALLE vereiste properties exact matchen (bv. tv == 2)
+  // - Actieve order: rood als we wel iets van de vereiste properties zien, maar niet het doel-aantal
+  // - Niet-actieve orders: grijs
+  function updateOrdersHighlight() {
+    if (!ordersBody || !orders.length) return;
+
+    // 0) Alles eerst “grijs” (neutrale kleur voor niet-actieve orders)
+    ordersBody.querySelectorAll('tr').forEach(tr => {
+      tr.classList.remove('table-success', 'table-danger', 'table-primary', 'table-Light');
+      tr.classList.add('table-Light'); // custom licht/grijs (of vervang door 'table-secondary' als je wil)
+    });
+
+    // 1) Zoek de rij van de actieve order
+    const active = orders.find(o => String(o.order_id) === ACTIVE_ORDER_ID);
+    if (!active) return;
+
+    const tr = ordersBody.querySelector(`tr[data-order-id="${ACTIVE_ORDER_ID}"]`);
+    if (!tr) return;
+
+    // 2) Haal de vereisten van het subtype uit de cache (bv. { tv: 2 } of { person:1, tv:2 })
+    const cached = axleCache.get(active.axle_type);
+    const sub = cached?.subtypesByName?.get(String(active.axle_subtype));
+    const req = (sub && sub.values) ? sub.values : {};
+
+    const keys = Object.keys(req || {});
+    if (keys.length === 0) {
+      // Geen eisen voor dit subtype → laat grijs
+      tr.classList.remove('table-success', 'table-danger', 'table-primary');
+      tr.classList.add('table-Light');
+      return;
+    }
+
+    // 3) Vergelijk “in beeld” (presentMap) met “vereist” (req)
+    const allZeroDetected = keys.every(k => (presentMap[k] || 0) === 0); // niks gezien voor alle vereiste keys
+
+    const allMatch =
+      keys.length > 0 &&
+      keys.every(k => {
+        const need = Number(req[k]) || 0;
+        const have = Number(presentMap[k] || 0);
+        return need > 0 && have === need;
+      });
+
+    const anySeenWrong =
+      keys.some(k => {
+        const need = Number(req[k]) || 0;
+        const have = Number(presentMap[k] || 0);
+        return have > 0 && have !== need; // wél gezien, maar niet het doel
+      });
+
+    // 4) Pas kleur toe op de actieve rij
+    tr.classList.remove('table-success', 'table-danger', 'table-primary', 'table-Light');
+
+    if (allMatch) {
+      tr.classList.add('table-success');   // ✅ exact goed
+    } else if (allZeroDetected) {
+      tr.classList.add('table-primary');   // 🔵 actief, maar nog niets gezien
+    } else if (anySeenWrong) {
+      tr.classList.add('table-danger');    // 🔴 we zien de property, maar niet het juiste aantal
+    } else {
+      tr.classList.add('table-Light');     // ◻️ overige gevallen → neutraal
+    }
+  }
+
+  // ==========================
+  // WebSocket: live updates van de server
+  // ==========================
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => ws.send("hi"); // simpele handshake/ping naar server
+  ws.onopen = () => ws.send("hi"); // eenvoudige keepalive
 
-  // Verwerken van berichten die binnenkomen via de WS
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
 
-    // Init/config bericht (verstuurd bij connect of na config-update)
+    // Init/config—bericht: vul UI-elementen en waardes
     if (msg.type === "config") {
-      const cfg = msg.config || {};
-      const models = msg.models || [];
-      const classes = msg.classes || null;
+      currentConfig = msg.config || {};
 
-      // Model dropdown vullen
+      // Modelkeuze
       if (modelSel) {
         modelSel.innerHTML = "";
-        for (const m of models) {
-          const opt = document.createElement("option");
+        (msg.models || []).forEach(m => {
+          const opt = document.createElement('option');
           opt.value = m; opt.textContent = m;
           modelSel.appendChild(opt);
-        }
-        if (cfg.model_key) modelSel.value = cfg.model_key;
+        });
+        if (currentConfig.model_key) modelSel.value = currentConfig.model_key;
       }
 
-      // Sliders initialiseren met huidige waarden
-      if (confInp && confVal) { confInp.value = cfg.conf ?? 0.35; confVal.textContent = (+confInp.value).toFixed(2); }
-      if (iouInp && iouVal)   { iouInp.value  = cfg.iou ?? 0.45;  iouVal.textContent  = (+iouInp.value).toFixed(2); }
-      if (imgszInp && imgszVal){ imgszInp.value = cfg.imgsz ?? 640; imgszVal.textContent = `${imgszInp.value}`; }
+      // Sliders updaten met huidige waarden
+      if (confInp && currentConfig.conf != null) confInp.value = currentConfig.conf;
+      if (iouInp  && currentConfig.iou  != null) iouInp.value  = currentConfig.iou;
+      if (imgszInp&& currentConfig.imgsz!= null) imgszInp.value= currentConfig.imgsz;
+      if (holdInp && currentConfig.hold_ms   != null) holdInp.value = currentConfig.hold_ms;
+      if (hitsInp && currentConfig.min_hits  != null) hitsInp.value = currentConfig.min_hits;
+      if (emaInp  && currentConfig.ema_alpha != null) emaInp.value = currentConfig.ema_alpha;
 
-      // Klassen checkboxes invullen
-      if (classesBox && classes && Array.isArray(classes)) {
-        renderClassCheckboxes(classes, cfg.allowed_classes || []);
+      // Klassen-checkboxen opbouwen (optioneel)
+      if (classesBox && Array.isArray(msg.classes)) {
+        const allowed = new Set((currentConfig.allowed_classes || []).map(s => s.toLowerCase()));
+        classesBox.innerHTML = "";
+        msg.classes.forEach(label => {
+          const id = `cls_${label.replace(/\W+/g,'_')}`;
+          const wrap = document.createElement('div');
+          wrap.className = 'form-check';
+
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.className = 'form-check-input';
+          cb.id = id;
+          cb.value = label;
+          cb.checked = allowed.size === 0 ? true : allowed.has(label.toLowerCase());
+
+          const lab = document.createElement('label');
+          lab.className = 'form-check-label';
+          lab.setAttribute('for', id);
+          lab.textContent = label;
+
+          wrap.appendChild(cb);
+          wrap.appendChild(lab);
+          classesBox.appendChild(wrap);
+        });
       }
-      return; // klaar met configbericht
+      return;
     }
 
-    // Detectie-bericht (komt elke frame binnen met huidige detecties)
+    // Realtime detecties: tabel + “in beeld” en vervolgens orders kleuren
     if (msg.type === "detections") {
-      renderDetections(msg.items || []);  // tabel met individuele detecties
-      renderPresent(msg.present || []);   // "In beeld" aantallen (stabiel)
+      renderDetections(msg.items || []);
+      renderPresent(msg.present || []);
       return;
     }
   };
 
-  // --- UI-render functies ---
-
-  // Vul de detectietabel met rijen: label + confidence
+  // ==========================
+  // Rendering helpers
+  // ==========================
+  // Individuele detecties (onderaan: label + confidence)
   function renderDetections(items) {
+    if (!tbody) return;
     tbody.innerHTML = "";
     if (!items.length) {
       tbody.innerHTML = `<tr><td colspan="2">No objects</td></tr>`;
@@ -113,85 +244,81 @@
     }
     for (const it of items) {
       const tr = document.createElement("tr");
-      const tdL = document.createElement("td");
-      const tdC = document.createElement("td");
-      tdL.textContent = it.label;
-      tdC.textContent = `${it.conf}%`;
-      tr.appendChild(tdL);
-      tr.appendChild(tdC);
+      tr.innerHTML = `<td>${it.label}</td><td>${it.conf}%</td>`;
       tbody.appendChild(tr);
     }
   }
 
-  // Toon stabiele tellingen ("present"): bijv. "tv × 2", "person × 3"
+  // “In beeld” badges + update van orderkleur op basis van huidige tellingen
   function renderPresent(arr) {
-    if (!stickyBox) return;
-    if (!arr || !arr.length) {
-      stickyBox.textContent = "Geen objecten in beeld…";
-      return;
+    presentMap = {};
+    arr.forEach(s => presentMap[s.label] = s.count);
+
+    if (stickyBox) {
+      if (!arr.length) {
+        stickyBox.textContent = "Geen objecten in beeld…";
+      } else {
+        stickyBox.innerHTML = "";
+        for (const s of arr) {
+          const span = document.createElement("span");
+          span.className = "badge text-bg-secondary me-1";
+          span.textContent = `${s.label} × ${s.count}`;
+          stickyBox.appendChild(span);
+        }
+      }
     }
-    stickyBox.innerHTML = "";
-    for (const s of arr) {
-      const span = document.createElement("span");
-      span.className = "pill"; // CSS-klasse voor mooie badge
-      span.textContent = `${s.label} × ${s.count}`;
-      stickyBox.appendChild(span);
-    }
+
+    // Na elke update de actieve order opnieuw evalueren/inkleuren
+    updateOrdersHighlight();
   }
 
-  // (Optioneel) render checkboxes voor alle klassen
-  function renderClassCheckboxes(allClasses, allowed) {
-    if (!classesBox) return;
-    const allowedSet = new Set((allowed || []).map(x => x.toLowerCase()));
-    classesBox.innerHTML = "";
-    allClasses.forEach(label => {
-      const id = `cls_${label.replace(/\W+/g, "_")}`;
-      const wrap = document.createElement("label");
-      wrap.className = "class-item";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.value = label;
-      cb.id = id;
-      // Als allowed leeg is → alles toegestaan (dus alle vakjes aangevinkt)
-      cb.checked = (allowedSet.size === 0) ? true : allowedSet.has(label.toLowerCase());
-      const txt = document.createElement("span");
-      txt.textContent = label;
-      wrap.appendChild(cb);
-      wrap.appendChild(txt);
-      classesBox.appendChild(wrap);
-    });
-  }
-
-  // Config opslaan: stuur huidige UI-waarden naar /api/config
+  // ==========================
+  // Opslaan van instellingen (POST /api/config)
+  // ==========================
   async function saveConfig() {
+    // Allowed classes: als álle checkboxen aanstaan sturen we een lege lijst (betekent “alles”)
     const allowed = [];
     if (classesBox) {
       classesBox.querySelectorAll('input[type="checkbox"]').forEach(cb => { if (cb.checked) allowed.push(cb.value); });
     }
     const total = classesBox ? classesBox.querySelectorAll('input[type="checkbox"]').length : 0;
-    const allowed_classes = (total && allowed.length === total) ? [] : allowed; // leeg = alles
+    const allowed_classes = (total && allowed.length === total) ? [] : allowed;
 
     const body = {
       model_key: modelSel ? modelSel.value : undefined,
-      conf: confInp ? parseFloat(confInp.value) : undefined,
-      iou: iouInp ? parseFloat(iouInp.value) : undefined,
-      imgsz: imgszInp ? parseInt(imgszInp.value, 10) : undefined,
+      conf:   confInp ? parseFloat(confInp.value)   : undefined,
+      iou:    iouInp  ? parseFloat(iouInp.value)    : undefined,
+      imgsz:  imgszInp? parseInt(imgszInp.value,10) : undefined,
       allowed_classes
     };
-
-    await fetch("/api/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
+    await POST("/api/config", body);
   }
 
-  // Event listeners voor knoppen
-  if (saveBtn) saveBtn.addEventListener("click", saveConfig);
+  // Alleen stabilisatie-parameters opslaan
+  async function saveStab() {
+    const body = {
+      hold_ms:   holdInp ? parseInt(holdInp.value,10)  : undefined,
+      min_hits:  hitsInp ? parseInt(hitsInp.value,10)  : undefined,
+      ema_alpha: emaInp ?  parseFloat(emaInp.value)    : undefined,
+    };
+    await POST("/api/config", body);
+  }
+
+  // Buttons koppelen (indien aanwezig op de pagina)
+  if (saveBtn)     saveBtn.addEventListener("click", saveConfig);
+  if (saveStabBtn) saveStabBtn.addEventListener("click", saveStab);
   if (allowAllBtn) allowAllBtn.addEventListener("click", () => {
     classesBox?.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
   });
   if (clearAllBtn) clearAllBtn.addEventListener("click", () => {
     classesBox?.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
   });
+
+  // ==========================
+  // Init (start)
+  // ==========================
+  (async () => {
+    // Vul de orders-tabel en warm de subtype-cache op
+    await loadOrders();
+  })();
 })();
