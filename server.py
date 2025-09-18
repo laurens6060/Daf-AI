@@ -30,6 +30,9 @@ from pydantic import BaseModel, Field
 from ultralytics import YOLO
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 from aiortc.contrib.media import MediaBlackhole
+from uuid import uuid4
+from fastapi import Path
+from fastapi.responses import RedirectResponse
 
 # ------------------------------
 # Defaults / tunables (basisinstellingen + standaardwaarden)
@@ -560,6 +563,197 @@ async def _on_startup():
     global main_loop
     main_loop = asyncio.get_running_loop()
 
+    # ---- Datamodellen ----
+    # Pydantic-modellen die de vorm van onze data vastleggen (valideren/serialiseren).
+
+    class Order(BaseModel):
+        order_id: str  # Unieke orderreferentie (bijv. "156545")
+        axle_type: str  # Code van het as-type (bijv. "1344")
+        axle_subtype: str  # Naam/nummer van subtype (bijv. "358")
+        qty: int = 1  # Optioneel: hoeveelheid (default 1)
+
+    class AxleTypeSpec(BaseModel):
+        code: str  # Typecode (bijv. "1344")
+        properties: List[str]  # Lijst met property-namen die dit type kan hebben (kolommen in de UI)
+
+    class Subtype(BaseModel):
+        id: str  # Unieke ID (uuid) voor dit subtype
+        name: str  # Menselijke naam/nummer (bijv. "358")
+        values: Dict[str, int]  # Waarden per property (property-naam -> integer)
+
+    class AxleTypeData(BaseModel):
+        spec: AxleTypeSpec  # De specificatie (code + properties)
+        subtypes: Dict[str, Subtype]  # Alle subtypes voor dit type (key = subtype_id)
+
+    # ---- Mock data ----
+    # Eén gedeelde properties-lijst als startsituatie. Deze wordt later dynamisch
+    # bijgesteld via recompute_schema() op basis van werkelijk aanwezige subtypes.
+    PROPERTY_SCHEMA = [
+        "bouten",  # aantal bouten
+        "absSchijf",  # ABS-schijf aanwezig (0/1) of aantal
+        "lasBlock",  # aantal lasblokken
+        "lager",  # aantal lagers
+        "afdichting",  # aantal afdichtingen
+        "flens",  # aantal flenzen
+    ]
+
+    # In-memory "database" met as-types. Elk type start met een spec (code + properties)
+    # en een lege set subtypes. We vullen subtypes hieronder met add_subtype().
+    AXLE_DB: Dict[str, AxleTypeData] = {
+        code: AxleTypeData(
+            spec=AxleTypeSpec(code=code, properties=PROPERTY_SCHEMA),
+            subtypes={}
+        )
+        for code in ["1344", "1132", "1347"]
+    }
+
+    # Helper om snel een subtype toe te voegen aan een as-type.
+    # - Genereert een uuid voor het subtype
+    # - Slaat het op in AXLE_DB[axle_code].subtypes
+    def add_subtype(axle_code: str, name: str, values: Dict[str, int]) -> Subtype:
+        st = Subtype(id=str(uuid4()), name=name, values=values)
+        AXLE_DB[axle_code].subtypes[st.id] = st
+        return st
+
+    def recompute_schema(axle_code: str) -> None:
+        """
+        Houd het 'properties'-schema van dit as-type in sync met wat er echt in subtypes staat.
+        We nemen de unie (alle unieke keys) van alle keys die in Subtype.values voorkomen,
+        sorteren die, en schrijven ze terug in AxleTypeSpec.properties.
+        Hierdoor verdwijnen kolommen automatisch wanneer geen enkel subtype die property nog heeft.
+        """
+        data = AXLE_DB[axle_code]
+        keys = set()
+        for st in data.subtypes.values():
+            if st.values:
+                keys.update(st.values.keys())
+        data.spec.properties = sorted(keys)
+
+    # Voorbeeld-subtypes (startdata voor de UI/REST).
+    add_subtype("1344", "358", {"bouten": 6, "absSchijf": 1, "lasBlock": 3, "lager": 2, "afdichting": 2, "flens": 1})
+    add_subtype("1344", "359", {"bouten": 8, "absSchijf": 1, "lasBlock": 4, "lager": 2, "afdichting": 2, "flens": 1})
+    add_subtype("1132", "201", {"person": 2})  # voorbeeld met andere property-naam
+    add_subtype("1347", "901", {"bouten": 10, "absSchijf": 1, "lasBlock": 3, "lager": 2, "afdichting": 2, "flens": 2})
+
+    # Mock orders (doen alsof deze uit een MES komen). Worden in viewer.html getoond.
+    ORDERS: List[Order] = [
+        Order(order_id="156545", axle_type="1344", axle_subtype="358"),
+        Order(order_id="156546", axle_type="1344", axle_subtype="359"),
+        Order(order_id="156547", axle_type="1132", axle_subtype="201"),
+        Order(order_id="156548", axle_type="1347", axle_subtype="901"),
+    ]
+
+    # ---- Pagina route voor de Axles UI ----
+    @app.get("/axles", response_class=HTMLResponse)
+    async def axles_page(request: Request):
+        """
+        Server-side render (Jinja2) van de Axles UI.
+        In deze pagina voert de front-end CRUD-acties uit via de REST-endpoints hieronder.
+        """
+        return templates.TemplateResponse("axles.html", {"request": request})
+
+    # ---- REST API: Orders ----
+    @app.get("/mes/orders")
+    async def list_orders():
+        """ Geef alle mock orders terug als JSON-lijst. """
+        return [o.model_dump() for o in ORDERS]
+
+    # ---- REST API: Axle types + subtypes ----
+
+    @app.get("/mes/axle-types")
+    async def list_axle_types():
+        """
+        Geef een lijst terug van alle as-types met hun huidige properties-schema.
+        (Handig om de type-select en kolomtitels in de UI te vullen.)
+        """
+        return [AXLE_DB[k].spec.model_dump() for k in sorted(AXLE_DB.keys())]
+
+    @app.get("/mes/axle-types/{code}")
+    async def get_axle_type(code: str = Path(...)):
+        """
+        Haal één as-type op inclusief:
+        - spec (code + properties)
+        - subtypes (lijst)
+        - columns (zelfde als properties; meegeleverd voor gemak in de UI)
+        """
+        if code not in AXLE_DB:
+            return JSONResponse({"error": "Unknown axle type"}, status_code=404)
+        data = AXLE_DB[code]
+        columns = list(data.spec.properties)  # na recompute_schema() altijd up-to-date
+        return {
+            "spec": data.spec.model_dump(),
+            "subtypes": [s.model_dump() for s in data.subtypes.values()],
+            "columns": columns,
+        }
+
+    # Payload-model voor aanmaken
+    class SubtypeCreate(BaseModel):
+        name: str
+        values: Dict[str, int] = {}
+
+    @app.post("/mes/axle-types/{code}/subtypes")
+    async def create_subtype(payload: SubtypeCreate, code: str = Path(...)):
+        """
+        Maak een nieuw subtype aan voor een as-type.
+        - Normaliseert alle values naar int
+        - Roept recompute_schema() aan om kolommen actueel te houden
+        """
+        if code not in AXLE_DB:
+            return JSONResponse({"error": "Unknown axle type"}, status_code=404)
+
+        normalized = {k: int(v) for k, v in (payload.values or {}).items()}
+        st = add_subtype(code, payload.name, normalized)
+        recompute_schema(code)
+        return st.model_dump()
+
+    # Payload-model voor updaten (alles optioneel)
+    class SubtypeUpdate(BaseModel):
+        name: Optional[str] = None
+        values: Optional[Dict[str, int]] = None
+
+    @app.put("/mes/axle-types/{code}/subtypes/{sub_id}")
+    async def update_subtype(payload: SubtypeUpdate, code: str = Path(...), sub_id: str = Path(...)):
+        """
+        Update naam en/of values van een subtype.
+        - Schrijft terug in AXLE_DB
+        - Roept recompute_schema() aan om kolommen te herberekenen
+        """
+        if code not in AXLE_DB:
+            return JSONResponse({"error": "Unknown axle type"}, status_code=404)
+        sub = AXLE_DB[code].subtypes.get(sub_id)
+        if not sub:
+            return JSONResponse({"error": "Unknown subtype"}, status_code=404)
+
+        if payload.name is not None:
+            sub.name = payload.name
+        if payload.values is not None:
+            sub.values = {k: int(v) for k, v in payload.values.items()}
+
+        AXLE_DB[code].subtypes[sub_id] = sub
+        recompute_schema(code)
+        return sub.model_dump()
+
+    @app.delete("/mes/axle-types/{code}/subtypes/{sub_id}")
+    async def delete_subtype(code: str = Path(...), sub_id: str = Path(...)):
+        """
+        Verwijder een subtype uit een as-type.
+        - Na verwijderen kolomschema opnieuw afleiden
+        """
+        if code not in AXLE_DB:
+            return JSONResponse({"error": "Unknown axle type"}, status_code=404)
+        sub = AXLE_DB[code].subtypes.pop(sub_id, None)
+        if not sub:
+            return JSONResponse({"error": "Unknown subtype"}, status_code=404)
+
+        recompute_schema(code)
+        return {"ok": True, "deleted": sub_id}
+
+    @app.get("/axles.html")
+    async def axles_html_redirect():
+        """ Oude URL doorverwijzen naar /axles (handig voor statische links/boekmarks). """
+        return RedirectResponse(url="/axles", status_code=307)
+
+
 # ------------------------------
 # Entrypoint (Uvicorn)
 # ------------------------------
@@ -573,3 +767,5 @@ if __name__ == "__main__":
         app, host="0.0.0.0", port=8000,
         ssl_keyfile=ssl_key, ssl_certfile=ssl_crt
     )
+
+
