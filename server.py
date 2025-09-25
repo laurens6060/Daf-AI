@@ -39,6 +39,34 @@ from ultralytics import YOLO
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 from aiortc.contrib.media import MediaBlackhole
 from glob import glob
+import socket
+import webbrowser
+import re
+
+# ------------------------------
+# # Ip adres zoeken / webbrowser automatisch openen
+# ------------------------------
+def _get_lan_ip() -> str:
+    """Probeer je LAN IP te bepalen (werkt offline en zonder externe calls)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # '10.255.255.255' wordt niet echt gecontacteerd dit triggert OS om de juiste NIC te kiezen
+        s.connect(("10.255.255.255", 1))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    finally:
+        s.close()
+    return ip
+
+def _open_browser_soon(url: str, delay: float = 1.5):
+    """Open de default browser een fractie na serverstart (race-conditions vermijden)."""
+    def _go():
+        try:
+            webbrowser.open_new_tab(url)
+        except Exception:
+            pass
+    threading.Timer(delay, _go).start()
 
 # ------------------------------
 # Defaults / tunables
@@ -60,6 +88,8 @@ if not Path(TRACKER_CFG).exists():
 AVAILABLE_MODELS: Dict[str, str] = {
     "yolov8n": "yolov8n.pt",
     "yolov8s": "yolov8s.pt",
+    "yolov8n-seg": "yolov8n-seg.pt",
+    "yolov8s-seg": "yolov8s-seg.pt",
 }
 
 # ------------------------------
@@ -88,6 +118,7 @@ class AppConfig(BaseModel):
     hold_ms: int = Field(default=DEFAULT_HOLD_MS)
     min_hits: int = Field(default=DEFAULT_MIN_HITS)
     ema_alpha: float = Field(default=DEFAULT_EMA_ALPHA, ge=0.0, le=1.0)
+    show_masks: bool = True
 
 config = AppConfig()
 
@@ -238,19 +269,19 @@ def _list_trained_models() -> list[dict]:
     items = []
 
     # runs/**/weights/{best,last}.pt
-    for pat in ["runs/**/weights/best.pt", "runs/**/weights/last.pt"]:
-        for p in sorted(glob(pat, recursive=True)):
-            try:
-                st = os.stat(p)
-                items.append({
-                    "name": Path(p).parts[-3] + " / " + Path(p).name,  # bv. train7 / best.pt
-                    "path": p,
-                    "size": st.st_size,
-                    "mtime": int(st.st_mtime),
-                    "source": "run"
-                })
-            except Exception:
-                pass
+    #for pat in ["runs/**/weights/best.pt", "runs/**/weights/last.pt"]:
+    #    for p in sorted(glob(pat, recursive=True)):
+    #       try:
+    #           st = os.stat(p)
+    #           items.append({
+    #               "name": Path(p).parts[-3] + " / " + Path(p).name,  # bv. train7 / best.pt
+    #               "path": p,
+    #              "size": st.st_size,
+    #              "mtime": int(st.st_mtime),
+    #              "source": "run"
+    #         })
+    #      except Exception:
+    #          pass
 
     # runs/exported/*.pt
     for p in sorted(glob("runs/exported/*.pt")):
@@ -266,11 +297,43 @@ def _list_trained_models() -> list[dict]:
         except Exception:
             pass
 
+        # runs/segment/**/weights/best.pt
+        #for pseg in sorted(glob("runs/segment/**/weights/best.pt")):
+            #    try:
+            #   st = os.stat(pseg)
+            #   items.append({
+            #       "name": Path(pseg).name,
+            #       "path": pseg,
+            #       "size": st.st_size,
+            #       "mtime": int(st.st_mtime),
+            #       "source": "segment"
+            #   })
+            #except Exception:
+        #   pass
     # meest recent boven
     items.sort(key=lambda x: x["mtime"], reverse=True)
     return items
 
+def _short_base_key(path_or_name: str) -> str:
+    """
+    Haal 'yolov8n' of 'yolov8n-seg' uit een bestandsnaam/pad.
+    Valt terug op 'yolov8n' als er niets matcht.
+    """
+    m = re.search(r'(yolov8[nsmlx](?:-seg)?)', os.path.basename(str(path_or_name)))
+    return m.group(1) if m else 'yolov8n'
 
+def _safe_out_path(out_dir: Path, filename: str) -> Path:
+    """
+    Voorkom overschrijven: voeg (2), (3), ... toe als de naam al bestaat.
+    """
+    p = out_dir / filename
+    if not p.exists():
+        return p
+    stem, suf = p.stem, p.suffix
+    i = 2
+    while (out_dir / f"{stem}({i}){suf}").exists():
+        i += 1
+    return out_dir / f"{stem}({i}){suf}"
 # ------------------------------
 # Worker: tracking + stabilisatie + push
 # ------------------------------
@@ -304,6 +367,28 @@ def nms_per_class(dets: List[dict], iou_thr: float) -> List[dict]:
             arr = [d for d in arr if _iou_xyxy(m['xyxy'], d['xyxy']) < iou_thr]
         out.extend(keep)
     return out
+
+def _color_for_label(label: str) -> tuple[int,int,int]:
+    """Deterministische BGR kleur per label."""
+    h = abs(hash(label)) % 255
+    return ( (h*3) % 255, (h*5) % 255, (h*7) % 255 )
+
+def draw_mask_polygons(annotated: np.ndarray, polys: list[np.ndarray], color_bgr: tuple[int,int,int], alpha: float=0.35):
+    """
+    polys: lijst van Nx2 float arrays (xy), zoals result.masks.xy[i]
+    Tekent halftransparante polygon-fill + dunne rand.
+    """
+    if not polys:
+        return
+    overlay = annotated.copy()
+    for poly in polys:
+        if poly is None or len(poly) < 3:  # min. drie punten
+            continue
+        pts = np.asarray(poly, dtype=np.int32).reshape(-1, 1, 2)
+        cv2.fillPoly(overlay, [pts], color_bgr)
+        cv2.polylines(overlay, [pts], isClosed=True, color=color_bgr, thickness=2)
+    cv2.addWeighted(overlay, alpha, annotated, 1 - alpha, 0, dst=annotated)
+
 
 
 def infer_loop():
@@ -366,6 +451,22 @@ def infer_loop():
 
                 primary_dets.append({"xyxy": (x1, y1, x2, y2), "conf": conf_i, "label": label, "src": "primary"})
 
+        primary_polys = []  # lijst van (label, polys)
+        if r is not None and getattr(r, "masks", None) is not None and r.masks is not None:
+            # r.masks.xy is een lijst; index i correspondeert met boxes i
+            try:
+                masks_xy = r.masks.xy  # List[np.ndarray Nx2]
+            except Exception:
+                masks_xy = None
+            if masks_xy:
+                names = primary.names if hasattr(primary, 'names') else {}
+                for i, poly in enumerate(masks_xy):
+                    cls_i = int(r.boxes.cls[i].item()) if r.boxes is not None else None
+                    label = (names.get(cls_i, str(cls_i)) if isinstance(names, dict) else str(cls_i))
+                    if not allowed_filter(label):
+                        continue
+                    primary_polys.append((label, [poly]))
+
         # hold_ms cleanup (tracking blijft ongewijzigd)
         expire = []
         for obj_id, st in list(track_states.items()):
@@ -374,17 +475,26 @@ def infer_loop():
         for obj_id in expire:
             track_states.pop(obj_id, None)
 
-        # 2) OTHERS: predict() en verzamel dets
+        # 2) OTHERS: predict() en verzamel dets + masks
         extra_dets = []
+        extra_polys = []
+
         for m in others:
             try:
-                res = m.predict(img, imgsz=config.imgsz, conf=config.conf, iou=config.iou, verbose=False, max_det=MAX_DET)[0]
+                res = m.predict(
+                    img, imgsz=config.imgsz, conf=config.conf, iou=config.iou,
+                    verbose=False, max_det=MAX_DET
+                )[0]
             except Exception as e:
                 print(f"[infer_loop] extra model predict() error: {e}")
                 continue
+
             if res.boxes is None or len(res.boxes) == 0:
                 continue
+
             names = m.names if hasattr(m, 'names') else {}
+
+            # boxes
             for k in range(len(res.boxes)):
                 cls_k = int(res.boxes.cls[k].item())
                 label_k = (names[cls_k] if isinstance(names, dict) and cls_k in names else str(cls_k))
@@ -393,6 +503,21 @@ def infer_loop():
                 conf_k = float(res.boxes.conf[k].item() if res.boxes.conf is not None else 0.0)
                 x1, y1, x2, y2 = map(int, res.boxes.xyxy[k].tolist())
                 extra_dets.append({"xyxy": (x1, y1, x2, y2), "conf": conf_k, "label": label_k, "src": "extra"})
+
+            # masks (optioneel per seg-model)
+            if getattr(res, "masks", None) is not None and res.masks is not None:
+                try:
+                    masks_xy = res.masks.xy  # List[np.ndarray]
+                except Exception:
+                    masks_xy = None
+                if masks_xy:
+                    for k, poly in enumerate(masks_xy):
+                        cls_k = int(res.boxes.cls[k].item()) if res.boxes is not None else None
+                        label_k = (names.get(cls_k, str(cls_k)) if isinstance(names, dict) else str(cls_k))
+                        if not allowed_filter(label_k):
+                            continue
+                        extra_polys.append((label_k, [poly]))
+
 
         # 3) SAMENVOEGEN via per-klasse NMS
         combined = nms_per_class(primary_dets + extra_dets, iou_thr=float(config.iou))
@@ -434,6 +559,16 @@ def infer_loop():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,180,255), 2)
             table_items.append((label, conf))
             active_labels.append(label)
+
+        # 4c) Masks tekenen (indien show_masks=True en model levert masks)
+        if getattr(config, "show_masks", True):
+            # Teken eerst primary masks (zelfde kleur per label)
+            for label, polys in primary_polys:
+                draw_mask_polygons(annotated, polys, _color_for_label(label), alpha=0.35)
+
+            # Teken extra model masks
+            for label, polys in extra_polys:
+                draw_mask_polygons(annotated, polys, _color_for_label(label), alpha=0.25)
 
         # 5) Publiceer resultaten
         latest_frame = annotated
@@ -627,6 +762,7 @@ class ConfigUpdate(BaseModel):
     hold_ms: Optional[int] = None
     min_hits: Optional[int] = None
     ema_alpha: Optional[float] = None
+    show_masks: Optional[bool] = None
 
 @app.get("/api/config")
 async def get_config():
@@ -655,6 +791,7 @@ async def update_config(body: ConfigUpdate):
     if body.hold_ms   is not None: config.hold_ms   = int(body.hold_ms)
     if body.min_hits  is not None: config.min_hits  = int(body.min_hits)
     if body.ema_alpha is not None: config.ema_alpha = float(body.ema_alpha)
+    if body.show_masks is not None: config.show_masks = bool(body.show_masks)
 
     msg = {
         "type": "config",
@@ -747,20 +884,33 @@ async def api_detect(
         return JSONResponse({"error": f"Predict error: {e}"}, status_code=500)
 
     out = []
+    names = m.names if hasattr(m, "names") else {}
+    has_masks = getattr(res, "masks", None) is not None and getattr(res.masks, "xy", None) is not None
+    masks_xy = res.masks.xy if has_masks else None
+
     if res.boxes is not None and len(res.boxes):
-        boxes = res.boxes
-        names = m.names
-        for k in range(len(boxes)):
-            cls = int(boxes.cls[k].item())
+        for k in range(len(res.boxes)):
+            cls = int(res.boxes.cls[k].item())
             label = names[cls] if isinstance(names, dict) else str(cls)
-            confv = float(boxes.conf[k].item() if boxes.conf is not None else 0.0)
-            x1, y1, x2, y2 = map(int, boxes.xyxy[k].tolist())
-            out.append({
+            confv = float(res.boxes.conf[k].item() if res.boxes.conf is not None else 0.0)
+            x1, y1, x2, y2 = map(int, res.boxes.xyxy[k].tolist())
+
+            item = {
                 "x1": x1, "y1": y1, "x2": x2, "y2": y2,
                 "label": label, "conf": confv
-            })
+            }
+
+            # Voeg polygon-mask toe wanneer beschikbaar (YOLOv8-seg)
+            if masks_xy is not None and k < len(masks_xy) and masks_xy[k] is not None:
+                # masks_xy[k] is een Nx2 array [[x,y], ...] in afbeeldingspixels
+                poly = masks_xy[k]
+                # zorg dat het JSON-serialiseerbaar is (lijst van [x,y])
+                item["mask"] = [[float(p[0]), float(p[1])] for p in poly]
+
+            out.append(item)
 
     return {"items": out}
+
 
 # ------------------------------
 # Training jobs
@@ -890,13 +1040,25 @@ def _run_train(
         if best.exists():
             set_model_path(str(best))
             TRAIN_JOBS[job_id]['log'] += f"Nieuw model geladen: {best}\n"
+
             if export_dir:
                 out_dir = Path(export_dir)
                 out_dir.mkdir(parents=True, exist_ok=True)
-                ts = time.strftime("%Y%m%d_%H%M%S")
-                out_path = out_dir / f"{class_name}_{ts}_best.pt"
+
+                # korte, consistente naam: <class>_<yolov8X[-seg]>.pt
+                base_key = _short_base_key(base_weights)  # bv. 'yolov8n' of 'yolov8n-seg'
+                short_name = f"{class_name}_{base_key}.pt"
+
+                # optioneel: stuur seg-modellen standaard naar runs/segment i.p.v. runs/exported
+                # (alleen als export_dir leeg gelaten wordt aan de UI-kant)
+                # if export_dir is None:
+                #     out_dir = Path("runs/segment" if "-seg" in base_key else "runs/exported")
+                #     out_dir.mkdir(parents=True, exist_ok=True)
+
+                out_path = _safe_out_path(out_dir, short_name)
                 shutil.copy2(best, out_path)
                 exported_path = str(out_path)
+
                 TRAIN_JOBS[job_id]['log'] += f"Model geëxporteerd naar: {out_path}\n"
         if exported_path:
             TRAIN_JOBS[job_id]['export_path'] = exported_path
@@ -1077,6 +1239,16 @@ class Product(BaseModel):
     collection_id: Optional[str] = None
     properties: dict[str, AllowedVal] = Field(default_factory=dict)
 
+class Polygon(BaseModel):
+    cls: int
+    points: List[List[float]]  # pixelcoords [[x,y],...]
+
+class SaveMasksReq(BaseModel):
+    image_path: str  # bv. "/uploads/trainer/abc123.jpg" of een relatieve path
+    width: int
+    height: int
+    polygons: List[Polygon]
+
 # --- Collections CRUD ---
 @app.get("/collections")
 async def list_collections():
@@ -1225,6 +1397,38 @@ async def api_models_active_set(req: ActiveModelsReq):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
+LABELS_DIR = Path("labels")  # of wherever jouw labels staan
+
+def _to_label_path(image_path: str) -> Path:
+    p = Path(image_path)
+    # zorg dat je naar de *bron*afbeelding wijst of reconstrueer het pad:
+    stem = p.stem
+    return LABELS_DIR / f"{stem}.txt"
+
+@app.post("/api/trainer/save-masks")
+async def save_masks(payload: SaveMasksReq):
+    LABELS_DIR.mkdir(parents=True, exist_ok=True)
+    img_w, img_h = float(payload.width), float(payload.height)
+
+    lines = []
+    for poly in payload.polygons:
+        coords = []
+        for x, y in poly.points:
+            xn = max(0.0, min(1.0, x / img_w))
+            yn = max(0.0, min(1.0, y / img_h))
+            coords.append(f"{xn:.6f}")
+            coords.append(f"{yn:.6f}")
+        if len(coords) >= 6:  # minimaal drie punten
+            lines.append(f"{int(poly.cls)} " + " ".join(coords))
+
+    if not lines:
+        return {"ok": False, "error": "Geen geldige polygonen"}
+
+    label_path = _to_label_path(payload.image_path)
+    label_path.parent.mkdir(parents=True, exist_ok=True)
+    label_path.write_text("\n".join(lines), encoding="utf-8")
+    return {"ok": True, "label_path": str(label_path)}
+
 # ------------------------------
 # Lifecycle hook
 # ------------------------------
@@ -1240,7 +1444,20 @@ if __name__ == "__main__":
     import uvicorn
     ssl_key = "key.pem" if os.path.exists("key.pem") else None
     ssl_crt = "cert.pem" if os.path.exists("cert.pem") else None
+
+    host = "0.0.0.0"
+    port = 8000
+    scheme = "https" if (ssl_key and ssl_crt) else "http"
+    # Toon een URL die voor andere devices op je LAN werkt:
+    origin_url = f"{scheme}://{_get_lan_ip()}:{port}/"
+
+    # Optioneel: zet NO_AUTO_OPEN=1 in je env om dit uit te zetten
+    if os.getenv("NO_AUTO_OPEN") != "1":
+        print(f"[INFO] Opening browser op: {origin_url}")
+        _open_browser_soon(origin_url, delay=1.5)
+
     uvicorn.run(
-        app, host="0.0.0.0", port=8000,
+        app, host=host, port=port,
         ssl_keyfile=ssl_key, ssl_certfile=ssl_crt
     )
+

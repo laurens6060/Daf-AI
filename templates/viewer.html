@@ -103,8 +103,24 @@
             <section class="col-12 col-lg-3">
                 <div class="card shadow-sm">
                     <div class="card-body">
-                        <!-- Info-knop opent modaal met uitleg -->
                         <div class="d-flex justify-content-end">
+                            <button class="btn btn-outline-dark btn-sm mb-3" data-bs-toggle="modal"
+                                data-bs-target="#qrModal">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                                    class="bi bi-qr-code" viewBox="0 0 16 16">
+                                    <path d="M2 2h2v2H2z" />
+                                    <path d="M6 0v6H0V0zM5 1H1v4h4zM4 12H2v2h2z" />
+                                    <path d="M6 10v6H0v-6zm-5 1v4h4v-4zm11-9h2v2h-2z" />
+                                    <path
+                                        d="M10 0v6h6V0zm5 1v4h-4V1zM8 1V0h1v2H8v2H7V1zm0 5V4h1v2zM6 8V7h1V6h1v2h1V7h5v1h-4v1H7V8zm0 0v1H2V8H1v1H0V7h3v1zm10 1h-1V7h1zm-1 0h-1v2h2v-1h-1zm-4 0h2v1h-1v1h-1zm2 3v-1h-1v1h-1v1H9v1h3v-2zm0 0h3v1h-2v1h-1zm-4-1v1h1v-2H7v1z" />
+                                    <path d="M7 12h1v3h4v1H7zm9 2v2h-3v-1h2v-1z" />
+                                </svg>
+                            </button>
+                        </div>
+                        <!-- Info-knop opent modaal met uitleg -->
+
+                        <div class="d-flex justify-content-end">
+
                             <button id="helpBtn" type="button" class="btn btn-outline-secondary btn-sm"
                                 data-bs-toggle="modal" data-bs-target="#helpModal">
                                 ℹ️ Info
@@ -254,7 +270,7 @@
                                                     <label class="form-check-label d-block">
                                                         <input id="multiToggle" type="checkbox"
                                                             class="form-check-input me-1" disabled>
-                                                        <span><em>Meerdere modellen tegelijk</em>
+                                                        <span><em>Meerdere modellen tegelijk</em></span>
                                                     </label>
                                                 </div>
                                             </div>
@@ -289,6 +305,23 @@
                                                 <span id="imgszVal" class="badge text-bg-secondary">640</span>
                                             </div>
                                         </div>
+
+                                        <!-- Weergave / overlay opties -->
+<div class="card mb-3">
+  <div class="card-body">
+    <h3 class="h6 mb-2">Weergave</h3>
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" id="showMasksInp">
+      <label class="form-check-label" for="showMasksInp">
+        Toon segmentatie-masks (indien model masks levert)
+      </label>
+    </div>
+    <div class="form-text">
+      Werkt met YOLOv8-seg modellen (bv. <code>yolov8n-seg.pt</code>).
+    </div>
+  </div>
+</div>
+
                                     </div>
                                 </div>
                             </div>
@@ -427,11 +460,11 @@
             <section class="col-12 col-lg-3">
                 <div class="card shadow-sm">
                     <div class="card-body">
-                        <h2 class="h5 mb-3">Collections & Products</h2>
+                        <h2 class="h5 mb-3">Categorie & Products</h2>
 
                         <div class="row g-2">
                             <div class="col-12">
-                                <label class="form-label fw-semibold">Collections</label>
+                                <label class="form-label fw-semibold">Categorie</label>
                                 <div id="collectionsList" class="list-group small"
                                     style="max-height:260px; overflow:auto;">
                                     <div class="list-group-item text-muted">Laden…</div>
@@ -462,7 +495,7 @@
                         </div>
 
                         <div class="form-text mt-2">
-                            Bron: <code>/products</code>. Klik op een collection om te filteren.
+                            Bron: <code>/products</code>. Klik op een categorie om te filteren.
                         </div>
                     </div>
                 </div>
@@ -470,6 +503,29 @@
 
         </div>
     </main>
+
+    <!-- QR Modal -->
+    <div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="qrTitle" class="modal-title fs-5">Open sender op smartphone</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Sluiten"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <p class="small text-muted mb-2">Scan de QR of tik op de link:</p>
+                    <div id="qrTarget" class="d-flex justify-content-center mb-3"></div>
+                    <a id="qrLink" href="#" target="_blank" class="link-primary fw-semibold"></a>
+                    <div class="mt-3">
+                        <button id="copyLinkBtn" class="btn btn-sm btn-outline-secondary">Kopieer link</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- QRCode.js (lichtgewicht, geen bundler nodig) -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 
     <!-- Bootstrap bundel (incl. Popper voor tooltips/modals/accordion) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"

@@ -144,6 +144,30 @@
                                         </div>
                                     </div>
 
+                                    <!-- Annotatie-tool -->
+<div class="mb-3">
+  <label class="form-label fw-semibold">Annotatie-tool</label>
+  <div class="btn-group btn-group-sm" role="group" aria-label="Annotatie tool">
+    <input type="radio" class="btn-check" name="tool" id="toolBox" autocomplete="off" checked>
+    <label class="btn btn-outline-primary" for="toolBox">Box</label>
+
+    <input type="radio" class="btn-check" name="tool" id="toolMask" autocomplete="off">
+    <label class="btn btn-outline-primary" for="toolMask">Mask</label>
+  </div>
+  <div class="form-text">
+    <strong>Box:</strong> slepen = positief, <kbd>Shift</kbd> + slepen = negatief.<br>
+    <strong>Mask:</strong> klik punten om een polygoon te tekenen, dubbelklik of “Sluit polygoon” om te sluiten.
+  </div>
+</div>
+
+<!-- Mask toolbar (alleen zichtbaar in Mask-modus) -->
+<div id="maskToolbar" class="d-flex gap-2 mb-3" style="display:none">
+  <button id="maskUndoPoint" class="btn btn-outline-secondary btn-sm" type="button">Undo punt</button>
+  <button id="maskClose" class="btn btn-success btn-sm" type="button">Sluit polygoon</button>
+  <button id="maskUndoPoly" class="btn btn-outline-danger btn-sm" type="button">Verwijder laatste mask</button>
+</div>
+
+
                                     <div class="d-flex gap-2 flex-wrap mb-3">
                                         <button id="exportTrain" class="btn btn-warning btn-sm">Exporteer & train (YOLOv8)</button>
                                         <button id="detectAll" class="btn btn-success btn-sm">Detecteer</button>
