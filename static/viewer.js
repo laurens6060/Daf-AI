@@ -39,6 +39,17 @@
     const productsBody = document.getElementById('productsBody');
     const productsCount = document.getElementById('productsCount');
 
+    const showMasksInp = document.getElementById("showMasksInp");
+
+    showMasksInp?.addEventListener('change', () => {
+  POSTJSON('/api/config', { show_masks: !!showMasksInp.checked })
+    .catch(e => alert('Kon show_masks niet opslaan: ' + e.message));
+});
+
+
+     // Wanneer de modal openklapt, bouw de QR naar /sender op dezelfde host/poort/protocol
+    const qrModalEl = document.getElementById('qrModal');
+
     // ===== In-memory staat =====
     let currentConfig = null; // laatste 'config' van de server (als bron van waarheid)
     let presentMap = {};      // snelle lookup voor label -> count (optioneel voor toekomstige UI-logica)
@@ -70,6 +81,54 @@
     bindRange(holdInp,  holdVal,  v => `${v} ms`);
     bindRange(hitsInp,  hitsVal,  v => `${v}`);
     bindRange(emaInp,   emaVal,   v => (+v).toFixed(2));
+
+    if (!qrModalEl) return;
+
+    const senderUrl = () => {
+      // Gebruik exact dezelfde origin als de viewer (juiste IP/poort/https):
+      const origin = window.location.origin;     // bv. http://192.168.1.50:8000
+      return origin + "/sender";
+    };
+
+    const qrContainer = document.getElementById('qrTarget');
+    const qrLinkEl    = document.getElementById('qrLink');
+    const copyBtn     = document.getElementById('copyLinkBtn');
+
+    let qr;
+
+ qrModalEl.addEventListener('show.bs.modal', function () {
+  const url = senderUrl();
+  qrLinkEl.textContent = url;
+  qrLinkEl.href = url;
+
+  qrContainer.innerHTML = "";
+
+  if (window.QRCode) {
+    new QRCode(qrContainer, {
+      text: url,
+      width: 220,
+      height: 220,
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  } else {
+    // Fallback: duidelijke melding
+    const warn = document.createElement('div');
+    warn.className = 'text-danger small';
+    warn.textContent = 'QR-module niet geladen; klik op de link hierboven.';
+    qrContainer.appendChild(warn);
+  }
+});
+
+
+    copyBtn?.addEventListener('click', async ()=>{
+      try {
+        await navigator.clipboard.writeText(senderUrl());
+        copyBtn.textContent = "Gekopieerd!";
+        setTimeout(()=> copyBtn.textContent = "Kopieer link", 1200);
+      } catch(e){
+        alert("Kopiëren mislukt, kopieer handmatig: " + senderUrl());
+      }
+    });
 
     /**
      * GET helper met JSON-parsing + error op HTTP status != 2xx.
@@ -125,6 +184,8 @@
             if (holdInp  && currentConfig.hold_ms    != null) holdInp.value  = currentConfig.hold_ms;
             if (hitsInp  && currentConfig.min_hits   != null) hitsInp.value  = currentConfig.min_hits;
             if (emaInp   && currentConfig.ema_alpha  != null) emaInp.value   = currentConfig.ema_alpha;
+            if (showMasksInp && typeof msg?.config?.show_masks === "boolean") {showMasksInp.checked = !!msg.config.show_masks;}
+
 
             // (Re)genereer class-checkboxen op basis van 'classes' van het primary model
             if (classesBox && Array.isArray(msg.classes)) {
@@ -216,7 +277,8 @@
             conf:  confInp  ? parseFloat(confInp.value)  : undefined,
             iou:   iouInp   ? parseFloat(iouInp.value)   : undefined,
             imgsz: imgszInp ? parseInt(imgszInp.value, 10) : undefined,
-            allowed_classes
+            allowed_classes,
+            show_masks: showMasksInp ? !!showMasksInp.checked : undefined
         });
     }
 

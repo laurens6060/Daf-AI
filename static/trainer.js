@@ -12,60 +12,57 @@
 // ============ State ============
 // Centrale in-memory status die we in alle handlers gebruiken.
 const state = {
-    items: [],   // [{ name, imgEl, boxes:[{x,y,w,h,label}], canvas, ctx, w, h }, ...]
-    polling: null, // setInterval-id (als polling actief is)
-    jobId: null    // huidige training job id (string) of null
+  items: [],   // { name, imgEl, boxes:[{x,y,w,h,label}], masks:[[{x,y},...]], tempPoly:[], canvas, ctx, w, h }
+  polling: null,
+  jobId: null
 };
 
 // Snelkoppelingen naar DOM-elementen (eenmalig zoeken, later hergebruiken)
 const els = {
-    // Sidebar / knoppen / infovelden
-    thumbs:    document.getElementById('thumbs'),     // container met alle image-kaarten
-    kPos:      document.getElementById('kPos'),       // KPI: aantal positieve boxes
-    kNeg:      document.getElementById('kNeg'),       // KPI: aantal negatieve boxes
-    kImgs:     document.getElementById('kImgs'),      // KPI: aantal afbeeldingen
-    log:       document.getElementById('log'),        // textarea/pre met loglijnen
-    status:    document.getElementById('status'),     // status-badge (Bootstrap)
-    jobInfo:   document.getElementById('jobInfo'),    // klein infoveld met job-id
-
-    // Bestandskeuze + knoppen
-    file:      document.getElementById('file'),       // <input type="file" multiple>
-    pick:      document.getElementById('pick'),       // "Kies bestanden" (klik triggert file.click())
-    sample:    document.getElementById('sample'),     // knop om voorbeeldimages te laden
-    clear:     document.getElementById('clear'),      // knop om alle kaarten te verwijderen
-
-    // Train/Export knoppen
-    exportTrain: document.getElementById('exportTrain'), // start export & training
-    cancelPoll:  document.getElementById('cancelPoll'),  // stop polling handmatig
-
-    // Formvelden voor training
-    className: document.getElementById('className'),  // classnaam (YOLO names: [className])
-    modelSel:  document.getElementById('modelSel'),   // basismodel key (yolov8n/s/…)
-    exportDir: document.getElementById('exportDir'),  // exportpad (optioneel)
-
-    // Resume vanaf bestaand model
-    resumeSel: document.getElementById('resumeSel'),  // <select> met bestaande .pt's
-    loadResume: document.getElementById('loadResumeBtn') // knop "Load model" zonder training
+  thumbs:    document.getElementById('thumbs'),
+  kPos:      document.getElementById('kPos'),
+  kNeg:      document.getElementById('kNeg'),
+  kImgs:     document.getElementById('kImgs'),
+  log:       document.getElementById('log'),
+  status:    document.getElementById('status'),
+  jobInfo:   document.getElementById('jobInfo'),
+  file:      document.getElementById('file'),
+  pick:      document.getElementById('pick'),
+  sample:    document.getElementById('sample'),
+  clear:     document.getElementById('clear'),
+  exportTrain: document.getElementById('exportTrain'),
+  cancelPoll:  document.getElementById('cancelPoll'),
+  className: document.getElementById('className'),
+  modelSel:  document.getElementById('modelSel'),
+  exportDir: document.getElementById('exportDir'),
+  resumeSel: document.getElementById('resumeSel'),
+  loadResume: document.getElementById('loadResumeBtn')
 };
 
-// Kleine helpers voor logging en statusweergave
-function log(msg) {
-    // Voeg een regel toe aan het logpaneel en scroll naar beneden
-    els.log.textContent += `\n${msg}`;
-    els.log.scrollTop = els.log.scrollHeight;
-}
-function setStatus(text, badge = 'text-bg-secondary') {
-    // Zet de Bootstrap-badge op de gewenste kleur + tekst
-    els.status.className = 'badge ' + badge;
-    els.status.textContent = text;
-}
-function refreshKpis() {
-    // Tel cumulatieve positive/negative boxes + images en update KPI’s
-    let p = 0, n = 0, imgs = state.items.length;
-    state.items.forEach(it => it.boxes.forEach(b => b.label === 'neg' ? n++ : p++));
-    els.kPos.textContent = p;
-    els.kNeg.textContent = n;
-    els.kImgs.textContent = imgs;
+// ============ Tool mode ============
+const tool = { mode: 'box' }; // 'box' | 'mask'
+document.getElementById('toolBox')?.addEventListener('change', () => {
+  tool.mode = 'box';
+  const mt = document.getElementById('maskToolbar');
+  if (mt) mt.style.display = 'none';
+});
+document.getElementById('toolMask')?.addEventListener('change', () => {
+  tool.mode = 'mask';
+  const mt = document.getElementById('maskToolbar');
+  if (mt) mt.style.display = 'flex';
+});
+
+
+// ============ Helpers ============
+function log(msg){ els.log.textContent += `\n${msg}`; els.log.scrollTop = els.log.scrollHeight; }
+function setStatus(text, badge='text-bg-secondary'){ els.status.className = 'badge ' + badge; els.status.textContent = text; }
+function refreshKpis(){
+  let p=0, n=0, imgs=state.items.length;
+  state.items.forEach(it=>{
+    it.boxes.forEach(b => b.label === 'neg' ? n++ : p++);
+    p += (it.masks?.length || 0);
+  });
+  els.kPos.textContent = p; els.kNeg.textContent = n; els.kImgs.textContent = imgs;
 }
 
 // ============ Geometry ============
@@ -81,258 +78,310 @@ function iou(a, b) {
 
 // ============ UI: kaart maken ============
 // Voegt een image-kaart toe met een IMG en een overlay CANVAS waar je boxes kunt tekenen.
-function addImageCard(fileName, imgUrl) {
-    // Kolom + card-shell
-    const col = document.createElement('div'); col.className = 'col-12 col-md-6';
-    const card = document.createElement('div'); card.className = 'image-card shadow-sm';
+function addImageCard(fileName, imgUrl){
+  const col = document.createElement('div'); col.className = 'col-12 col-md-6';
+  const card = document.createElement('div'); card.className = 'image-card shadow-sm';
 
-    // Header met bestandsnaam (afgekapt wanneer te lang)
-    const header = document.createElement('div'); header.className = 'd-flex justify-content-between align-items-center p-2 border-bottom bg-light';
-    header.innerHTML = `<strong class="text-truncate">${fileName}</strong>`;
+  const header = document.createElement('div'); header.className = 'd-flex justify-content-between align-items-center p-2 border-bottom bg-light';
+  header.innerHTML = `<strong class="text-truncate">${fileName}</strong>`;
 
-    // Wrap voor image + canvas (canvas staat bovenop de afbeelding)
-    const canvasWrap = document.createElement('div'); canvasWrap.className = 'canvas-wrap';
-    const img = new Image(); img.src = imgUrl; img.crossOrigin = 'anonymous'; // crossOrigin voor lokale files/WS uploads
-    const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+  const canvasWrap = document.createElement('div'); canvasWrap.className = 'canvas-wrap';
+  const img = new Image(); img.src = imgUrl; img.crossOrigin = 'anonymous';
+  const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
 
-    canvasWrap.appendChild(img);     // onderlaag
-    canvasWrap.appendChild(canvas);  // bovenlaag (tekenlaag)
-    card.appendChild(header);
-    card.appendChild(canvasWrap);
-    col.appendChild(card);
-    els.thumbs.prepend(col);         // nieuwste bovenaan
+  canvasWrap.appendChild(img); canvasWrap.appendChild(canvas);
+  card.appendChild(header); card.appendChild(canvasWrap);
+  col.appendChild(card);
+  els.thumbs.prepend(col);
 
-    // Item in state registreren
-    const item = { name: fileName, imgEl: img, boxes: [], canvas, ctx, w: 0, h: 0 };
-    state.items.push(item);
+  const item = { name:fileName, imgEl:img, boxes:[], masks:[], tempPoly:[], canvas, ctx, w:0, h:0 };
+  state.items.push(item);
 
-    // Wanneer de afbeelding geladen is, canvas op ware resolutie zetten en tekenen
-    img.onload = () => {
-        item.w = img.naturalWidth;
-        item.h = img.naturalHeight;
-        canvas.width = item.w;
-        canvas.height = item.h;
-        drawItem(item);
-        refreshKpis();
-    };
+  img.onload = ()=>{
+    item.w = img.naturalWidth; item.h = img.naturalHeight;
+    canvas.width = item.w; canvas.height = item.h;
+    drawItem(item); refreshKpis();
+  };
 
-    // Interactieve annotatie: muis down -> start, move -> huidige rechthoek, mouseup -> box vastleggen
-    let drawing = false, start = null, cur = null;
+  let drawing=false, start=null, cur=null;
 
-    // Schermcoördinaten (client) omzetten naar "natuurlijke" canvas-coördinaten (ware resolutie)
-    function toNatural(e) {
-        const r = canvas.getBoundingClientRect();
-        const cx = (e.clientX - r.left) * canvas.width / r.width;
-        const cy = (e.clientY - r.top) * canvas.height / r.height;
-        return { x: cx, y: cy };
+  function toNatural(e){
+    const r = canvas.getBoundingClientRect();
+    const cx = (e.clientX - r.left) * canvas.width / r.width;
+    const cy = (e.clientY - r.top)  * canvas.height / r.height;
+    return { x: cx, y: cy };
+  }
+
+  // BOX: drag; MASK: click-points
+  canvas.addEventListener('mousedown', e=>{
+    const p = toNatural(e);
+    if (tool.mode === 'box'){
+      drawing = true; start = p; cur = null;
+    } else {
+      item.tempPoly.push(p);
+      drawItem(item);
     }
+  });
 
-    // Start tekenen
-    canvas.addEventListener('mousedown', e => {
-        drawing = true;
-        start = toNatural(e);
-    });
+  canvas.addEventListener('mousemove', e=>{
+    if (tool.mode !== 'box' || !drawing) return;
+    cur = toNatural(e);
+    drawItem(item, start, cur);
+  });
 
-    // Tijdens tekenen: laat een gele "ghost" box zien
-    canvas.addEventListener('mousemove', e => {
-        if (!drawing) return;
-        cur = toNatural(e);
-        drawItem(item, start, cur);
-    });
+  window.addEventListener('mouseup', e=>{
+    if (tool.mode !== 'box' || !drawing) return;
+    drawing = false;
+    const end = toNatural(e);
+    const x = Math.min(start.x, end.x), y = Math.min(start.y, end.y);
+    const w = Math.abs(end.x - start.x), h = Math.abs(end.y - start.y);
+    if (w > 10 && h > 10) {
+      const isNeg = e.shiftKey;
+      item.boxes.push({ x, y, w, h, label: isNeg ? 'neg' : 'pos' });
+      drawItem(item); refreshKpis();
+      log(`${isNeg ? '- Negatieve' : '+ Positieve'} box toegevoegd (${fileName})`);
+    }
+  });
 
-    // Mouseup overal (ook buiten canvas) laat box vallen
-    window.addEventListener('mouseup', e => {
-        if (!drawing) return;
-        drawing = false;
-        const end = toNatural(e);
+  // Dblclick = mask sluiten
+  canvas.addEventListener('dblclick', ()=>{
+    if (tool.mode !== 'mask' || item.tempPoly.length < 3) return;
+    item.masks.push(item.tempPoly.slice());
+    item.tempPoly = [];
+    drawItem(item); refreshKpis(); log(`+ Mask toegevoegd (${fileName})`);
+  });
 
-        // Normaliseer naar linkerboven + positieve w/h
-        const x = Math.min(start.x, end.x), y = Math.min(start.y, end.y);
-        const w = Math.abs(end.x - start.x), h = Math.abs(end.y - start.y);
+  // Rechtermuisklik = undo
+  canvas.addEventListener('contextmenu', e=>{
+    e.preventDefault();
+    if (tool.mode === 'mask'){
+      if (item.tempPoly.length) item.tempPoly.pop();
+      else if (item.masks.length){ item.masks.pop(); log('− Laatste mask verwijderd (' + fileName + ')'); }
+    } else {
+      if (item.boxes.length){ item.boxes.pop(); log('− Laatste box verwijderd (' + fileName + ')'); }
+    }
+    drawItem(item); refreshKpis();
+  });
 
-        // Minimale boxgrootte om misclicks te vermijden
-        if (w > 10 && h > 10) {
-            // SHIFT ingedrukt = negatieve box (b.v. hard negatives), anders positief
-            const isNeg = e.shiftKey;
-            item.boxes.push({ x, y, w, h, label: isNeg ? 'neg' : 'pos' });
-            drawItem(item);
-            refreshKpis();
-            log(`${isNeg ? '- Negatieve' : '+ Positieve'} box toegevoegd (${fileName})`);
-        }
-    });
-
-    // Rechtermuisklik = undo (laatste box verwijderen)
-    canvas.addEventListener('contextmenu', e => {
-        e.preventDefault();
-        if (item.boxes.length) {
-            item.boxes.pop();
-            drawItem(item);
-            refreshKpis();
-            log(`− Laatste box verwijderd (${fileName})`);
-        }
-    });
-
-    return item;
+  return item;
 }
+
+  document.getElementById('maskUndoPoint')?.addEventListener('click', () => {
+  // undo geldt op laatst aangemaakte/gewijzigde card; hier simpel: op elk item tempPoly proberen
+  for (const it of state.items) {
+    if (it.tempPoly?.length) {
+      it.tempPoly.pop();
+      drawItem(it);
+      break;
+    }
+  }
+});
+
+document.getElementById('maskClose')?.addEventListener('click', () => {
+  for (const it of state.items) {
+    if (it.tempPoly?.length >= 3) {
+      it.masks.push(it.tempPoly.slice());
+      it.tempPoly = [];
+      drawItem(it);
+      refreshKpis();
+      log('+ Mask toegevoegd (' + it.name + ')');
+      break;
+    }
+  }
+});
+
+document.getElementById('maskUndoPoly')?.addEventListener('click', () => {
+  for (const it of state.items) {
+    if (it.masks?.length) {
+      it.masks.pop();
+      drawItem(it);
+      refreshKpis();
+      log('− Laatste mask verwijderd (' + it.name + ')');
+      break;
+    }
+  }
+});
 
 // ============ Tekenen ============
 // Teken image + alle definitieve boxes. Optioneel ook een "ghost" selectie tijdens het slepen.
 function drawItem(item, start = null, cur = null) {
-    const { ctx, canvas, imgEl } = item;
+  const { ctx, canvas, imgEl } = item;
 
-    // Achtergrond resetten en bronafbeelding tekenen
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(imgEl, 0, 0, item.w, item.h);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(imgEl, 0, 0, item.w, item.h);
 
-    // Lijndikte groeit mee met resolutie, zodat het er consistent uitziet
-    ctx.lineWidth = Math.max(4, Math.round(canvas.width / 350));
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
 
-    // Definitieve boxes tekenen (groen = positief, rood = negatief)
-    item.boxes.forEach(b => {
-        const x = b.x, y = b.y, w = b.w, h = b.h;
+  // Definitieve MASKS (groen gevuld + rand)
+  for (const poly of item.masks) {
+    if (!poly?.length) continue;
+    ctx.beginPath();
+    ctx.moveTo(poly[0].x, poly[0].y);
+    for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0,255,195,0.18)';
+    ctx.strokeStyle = '#00ffc3';
+    ctx.lineWidth = Math.max(3, Math.round(canvas.width / 400));
+    ctx.fill();
+    ctx.stroke();
+  }
 
-        // Transparante vulling + slagschaduw
-        ctx.fillStyle = (b.label === 'neg') ? 'rgba(239,68,68,0.15)' : 'rgba(0,255,195,0.18)';
-        ctx.fillRect(x, y, w, h);
-        ctx.shadowColor = 'rgba(0,0,0,0.7)';
-        ctx.shadowBlur = 6;
+  // Tijdelijke poly (mask in aanbouw)
+  if (item.tempPoly?.length) {
+    const tp = item.tempPoly;
+    ctx.beginPath();
+    ctx.moveTo(tp[0].x, tp[0].y);
+    for (let i = 1; i < tp.length; i++) ctx.lineTo(tp[i].x, tp[i].y);
+    ctx.strokeStyle = '#ffcc38';
+    ctx.setLineDash([10, 6]);
+    ctx.lineWidth = Math.max(3, Math.round(canvas.width / 400));
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-        // Contour
-        ctx.strokeStyle = (b.label === 'neg') ? '#ef4444' : '#00ffc3';
-        ctx.strokeRect(x, y, w, h);
-        ctx.shadowBlur = 0;
-    });
-
-    // "Ghost" selectie (geel) terwijl de muis beweegt
-    if (start && cur) {
-        const x = Math.min(start.x, cur.x), y = Math.min(start.y, cur.y),
-              w = Math.abs(cur.x - start.x), h = Math.abs(cur.y - start.y);
-        ctx.fillStyle = 'rgba(255,204,56,0.12)'; ctx.fillRect(x, y, w, h);
-        ctx.setLineDash([12, 8]);
-        ctx.strokeStyle = '#ffcc38';
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 4;
-        ctx.strokeRect(x, y, w, h);
-        ctx.setLineDash([]);
-        ctx.shadowBlur = 0;
+    // punten
+    ctx.fillStyle = '#ffcc38';
+    for (const p of tp) {
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(3, canvas.width/300), 0, Math.PI*2); ctx.fill();
     }
+  }
+
+  // BOXES (pos = groen, neg = rood)
+  for (const b of item.boxes) {
+    const x = b.x, y = b.y, w = b.w, h = b.h;
+    ctx.fillStyle = (b.label === 'neg') ? 'rgba(239,68,68,0.15)' : 'rgba(52,211,153,0.18)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = (b.label === 'neg') ? '#ef4444' : '#22e38f';
+    ctx.lineWidth = Math.max(3, Math.round(canvas.width / 400));
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  // Ghost box tijdens slepen (alleen box-tool)
+  if (start && cur) {
+    const x = Math.min(start.x, cur.x), y = Math.min(start.y, cur.y),
+          w = Math.abs(cur.x - start.x), h = Math.abs(cur.y - start.y);
+    ctx.fillStyle = 'rgba(255,204,56,0.12)'; ctx.fillRect(x, y, w, h);
+    ctx.setLineDash([12, 8]);
+    ctx.strokeStyle = '#ffcc38';
+    ctx.lineWidth = Math.max(3, Math.round(canvas.width / 400));
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+  }
 }
+
 
 // ============ Export + Train ============
 // Exporteert de huidige annotaties naar YOLO-indeling en start /api/train met FormData.
-async function exportToYOLOAndTrain() {
-    if (!state.items.length) { alert('Voeg eerst afbeeldingen toe.'); return; }
+async function exportToYOLOAndTrain(){
+  if (!state.items.length){ alert('Voeg eerst afbeeldingen toe.'); return; }
 
-    // Train-parameters ophalen; className wordt YOLO's "names: [className]"
-    const clsName = (els.className.value || 'object').trim() || 'object';
-    const baseModelKey = els.modelSel?.value || null;
-    const exportDir = (els.exportDir?.value || '').trim() || null;
+  const clsName = (els.className.value || 'object').trim() || 'object';
+  const baseModelKeyRaw = els.modelSel?.value || null;
+  const exportDir = (els.exportDir?.value || '').trim() || null;
 
-    // Optionele hyperparams (alleen meesturen als ingevuld)
-    const epochs      = (document.getElementById('epochs')?.value || '').trim();
-    const batch       = (document.getElementById('batch')?.value || '').trim();
-    const imgsz       = (document.getElementById('imgsz')?.value || '').trim();
-    const lr0         = (document.getElementById('lr0')?.value || '').trim();
-    const weightDecay = (document.getElementById('weightDecay')?.value || '').trim();
-    const patience    = (document.getElementById('patience')?.value || '').trim();
-    const augment     = document.getElementById('augment')?.checked ? 'true' : '';
+  const epochs      = (document.getElementById('epochs')?.value || '').trim();
+  const batch       = (document.getElementById('batch')?.value || '').trim();
+  const imgsz       = (document.getElementById('imgsz')?.value || '').trim();
+  const lr0         = (document.getElementById('lr0')?.value || '').trim();
+  const weightDecay = (document.getElementById('weightDecay')?.value || '').trim();
+  const patience    = (document.getElementById('patience')?.value || '').trim();
+  const augment     = document.getElementById('augment')?.checked ? 'true' : '';
+  const resumeFrom  = (els.resumeSel?.value || '').trim();
 
-    // Vanaf bestaand checkpoint hervatten?
-    const resumeFrom = (els.resumeSel?.value || '').trim(); // leeg = start from base
+  setStatus('Dataset opbouwen…','text-bg-warning');
+  els.exportTrain.disabled = true;
 
-    setStatus('Dataset opbouwen…', 'text-bg-warning');
-    els.exportTrain.disabled = true;
+  const fd = new FormData();
+  let imgCount=0, posCount=0, usedSegMasks=0;
 
-    // Bouw dataset: we sturen IMG's + bijbehorende YOLO labelbestanden mee
-    const fd = new FormData();
-    let imgCount = 0, posCount = 0;
+  for (const item of state.items){
+    const hasAny = item.boxes.some(b => b.label !== 'neg') || (item.masks?.length);
+    if (!hasAny) continue;
 
-    for (const item of state.items) {
-        if (!item.boxes.length) continue;
+    // Export ZONDER overlays: render bronafbeelding naar offscreen canvas
+    const off = document.createElement('canvas'); off.width = item.w; off.height = item.h;
+    const octx = off.getContext('2d'); octx.drawImage(item.imgEl, 0, 0, item.w, item.h);
+    const imgBlob = await new Promise(res => off.toBlob(res, "image/jpeg", 0.95));
 
-        // Render huidige canvas naar JPEG-blob (kwaliteit 0.95)
-        const imgBlob = await new Promise(res => item.canvas.toBlob(res, "image/jpeg", 0.95));
+    const stem = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+    fd.append('files', new File([imgBlob], `images/${stem}.jpg`));
 
-        // Bestandsnaambasis (random) om pairs (jpg/txt) te groeperen
-        const stem = crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).slice(2));
+    const lines = [];
 
-        // 1) Afbeelding uploaden onder images/<stem>.jpg
-        fd.append('files', new File([imgBlob], `images/${stem}.jpg`));
-
-        // 2) Labels in YOLO TXT-formaat (class_id cx cy w h) in genormaliseerde coördinaten
-        const lines = [];
-        for (const b of item.boxes.filter(b => b.label !== 'neg')) {
-            // Alleen POSITIEVE boxes worden als traininglabels gebruikt (negatives = implicit/background)
-            const cx = (b.x + b.w / 2) / item.w;
-            const cy = (b.y + b.h / 2) / item.h;
-            const ww = b.w / item.w;
-            const hh = b.h / item.h;
-            lines.push(`0 ${cx} ${cy} ${ww} ${hh}`); // '0' = class index (we trainen single-class op clsName)
-            posCount++;
+    // Masks -> YOLOv8-seg
+    if (Array.isArray(item.masks)){
+      for (const poly of item.masks){
+        if (!poly || poly.length < 3) continue;
+        const coords=[];
+        for (const p of poly){
+          const xn = Math.max(0, Math.min(1, p.x/item.w));
+          const yn = Math.max(0, Math.min(1, p.y/item.h));
+          coords.push(xn.toFixed(6), yn.toFixed(6));
         }
-        fd.append('files', new File([new Blob([lines.join('\n')], { type: 'text/plain' })], `labels/${stem}.txt`));
-        imgCount++;
+        lines.push(`0 ${coords.join(' ')}`); // single-class
+        usedSegMasks++;
+      }
     }
 
-    // Basisvalidatie: zonder positieve labels heeft trainen geen zin
-    if (imgCount === 0 || posCount === 0) {
-        setStatus('Geen (positieve) labels gevonden', 'text-bg-danger');
-        els.exportTrain.disabled = false;
-        return;
+    // Box-only (alleen als er geen mask is voor dit beeld)
+    if (!item.masks?.length){
+      for (const b of item.boxes.filter(b => b.label !== 'neg')){
+        const cx=(b.x+b.w/2)/item.w, cy=(b.y+b.h/2)/item.h;
+        const ww=b.w/item.w, hh=b.h/item.h;
+        lines.push(`0 ${cx} ${cy} ${ww} ${hh}`);
+        posCount++;
+      }
     }
 
-    // Verplichte velden
-    fd.append('class_name', clsName);
-    if (baseModelKey) fd.append('base_model_key', baseModelKey);
-    if (exportDir)    fd.append('export_dir', exportDir);
+    fd.append('files', new File([new Blob([lines.join('\n')], {type:'text/plain'})], `labels/${stem}.txt`));
+    imgCount++;
+  }
 
-    // Optionele hyperparams – alleen meesturen als ingevuld
-    if (epochs)      fd.append('epochs', epochs);
-    if (batch)       fd.append('batch', batch);
-    if (imgsz)       fd.append('imgsz', imgsz);
-    if (lr0)         fd.append('lr0', lr0);
-    if (weightDecay) fd.append('weight_decay', weightDecay);
-    if (patience)    fd.append('patience', patience);
-    if (augment)     fd.append('augment', 'true');
-    if (resumeFrom)  fd.append('resume_from', resumeFrom);
+  if (imgCount===0 || (posCount===0 && usedSegMasks===0)){
+    setStatus('Geen (positieve) labels of masks gevonden', 'text-bg-danger');
+    els.exportTrain.disabled = false;
+    return;
+  }
 
-    log(`Uploaden + trainen…  (resume: ${resumeFrom || 'nee'})`);
-    setStatus('Uploaden…', 'text-bg-warning');
+  // Verplichte & optionele velden
+  fd.append('class_name', clsName);
+  if (exportDir)    fd.append('export_dir', exportDir);
+  if (epochs)       fd.append('epochs', epochs);
+  if (batch)        fd.append('batch', batch);
+  if (imgsz)        fd.append('imgsz', imgsz);
+  if (lr0)          fd.append('lr0', lr0);
+  if (weightDecay)  fd.append('weight_decay', weightDecay);
+  if (patience)     fd.append('patience', patience);
+  if (augment)      fd.append('augment', 'true');
+  if (resumeFrom)   fd.append('resume_from', resumeFrom);
 
-    // Start training job op de backend
-    let resp;
-    try {
-        resp = await fetch('/api/train', { method: 'POST', body: fd });
-    } catch (e) {
-        setStatus('Netwerkfout bij upload', 'text-bg-danger');
-        els.exportTrain.disabled = false;
-        log(`Fout: ${e}`);
-        return;
-    }
+  // Kies basismodel, switch naar -seg als er masks zijn
+  if (baseModelKeyRaw){
+    const baseModelKey = (usedSegMasks>0 && !/-seg$/.test(baseModelKeyRaw))
+      ? baseModelKeyRaw.replace(/(yolov8[nsmlx])$/, '$1-seg')
+      : baseModelKeyRaw;
+    fd.append('base_model_key', baseModelKey);
+  }
 
-    // Interpretatie van serverantwoord
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-        setStatus('Serverfout bij starten', 'text-bg-danger');
-        log(`Fout: ${resp.status} ${JSON.stringify(data)}`);
-        els.exportTrain.disabled = false;
-        return;
-    }
+  log(`Uploaden + trainen…  (resume: ${resumeFrom || 'nee'})`);
+  setStatus('Uploaden…','text-bg-warning');
 
-    // Job gestart: job_id tonen en polling aanzetten
-    const jobId = data.job_id;
-    state.jobId = jobId;
-    els.jobInfo.textContent = jobId ? `Job: ${jobId}` : '';
-    setStatus('Training gestart', 'text-bg-info');
-    startPolling();
+  let resp;
+  try { resp = await fetch('/api/train', { method:'POST', body:fd }); }
+  catch(e){ setStatus('Netwerkfout bij upload','text-bg-danger'); els.exportTrain.disabled=false; log(`Fout: ${e}`); return; }
+
+  const data = await resp.json().catch(()=>({}));
+  if (!resp.ok){
+    setStatus('Serverfout bij starten','text-bg-danger');
+    log(`Fout: ${resp.status} ${JSON.stringify(data)}`);
+    els.exportTrain.disabled=false; return;
+  }
+
+  state.jobId = data.job_id;
+  els.jobInfo.textContent = state.jobId ? `Job: ${state.jobId}` : '';
+  setStatus('Training gestart','text-bg-info');
+  startPolling();
 }
-
-// Init: laad basismodellen en resume-keuzes zodra de pagina klaar is
-(async function initTrainerUI() {
-    await loadConfigAndModels();
-})();
 
 
 // ============ Polling ============
@@ -409,65 +458,99 @@ function stopPolling() {
 // --- helpers om server-detecties in te tekenen ---
 // Tekent resulterende detecties (from /api/detect) over de bestaande image.
 function drawDetectionsOnItem(item, dets) {
-    // Eerst alles resetten/overtekenen (zodat overlay schoon is)
-    drawItem(item);
+  // Achtergrond (bron + bestaande annotaties) opnieuw tekenen
+  drawItem(item);
 
-    const ctx = item.ctx;
-    const cvs = item.canvas;
+  const ctx  = item.ctx;
+  const cvs  = item.canvas;
+  const line = Math.max(3, Math.round(cvs.width / 400));
+  ctx.lineJoin = 'round';
+  ctx.lineCap  = 'round';
 
-    ctx.lineWidth = Math.max(4, Math.round(cvs.width / 350));
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
+  dets.forEach(d => {
+    const label = `${d.label} ${(d.conf * 100).toFixed(1)}%`;
 
-    // Verwacht dets: [{x1,y1,x2,y2,label,conf}, ...] met conf in [0..1]
-    dets.forEach(d => {
-        const x = d.x1, y = d.y1, w = d.x2 - d.x1, h = d.y2 - d.y1;
+    if (tool.mode === 'mask' && Array.isArray(d.mask) && d.mask.length >= 3) {
+      // === MASK tekenen ===
+      ctx.beginPath();
+      ctx.moveTo(d.mask[0][0], d.mask[0][1]);
+      for (let i = 1; i < d.mask.length; i++) {
+        ctx.lineTo(d.mask[i][0], d.mask[i][1]);
+      }
+      ctx.closePath();
 
-        // Groenachtige overlay voor detectie + slagschaduw
-        ctx.fillStyle = 'rgba(52,211,153,0.18)';
-        ctx.fillRect(x, y, w, h);
-        ctx.shadowColor = 'rgba(0,0,0,0.7)';
-        ctx.shadowBlur = 6;
-        ctx.strokeStyle = '#22e38f';
-        ctx.strokeRect(x, y, w, h);
-        ctx.shadowBlur = 0;
+      ctx.fillStyle   = 'rgba(0,255,195,0.18)';
+      ctx.strokeStyle = '#00ffc3';
+      ctx.lineWidth   = line;
+      ctx.fill();
+      ctx.stroke();
 
-        // Label met confidence (als badge-achtig blokje)
-        const label = `${d.label} ${(d.conf * 100).toFixed(1)}%`;
-        ctx.font = `${Math.max(12, Math.round((item.w) / 50))}px system-ui, sans-serif`;
-        const padX = 8, padY = 5;
-        const textW = ctx.measureText(label).width;
-        const textH = parseInt(ctx.font, 10) + padY * 2;
+      // label nabij eerste punt
+      ctx.font = `${Math.max(12, Math.round(item.w / 50))}px system-ui, sans-serif`;
+      const tx = d.mask[0][0] + 6;
+      const ty = d.mask[0][1] + 18;
+      const padX = 8, padY = 5;
+      const textW = ctx.measureText(label).width;
+      const textH = parseInt(ctx.font, 10) + padY * 2;
 
-        // Label boven de box plaatsen; zo niet, onderaan (als te weinig ruimte is)
-        let lx = x, ly = y - textH - 2;
-        if (ly < 0) ly = y + h + 2;
-        if (lx + textW + padX * 2 > item.canvas.width) {
-            lx = item.canvas.width - (textW + padX * 2) - 2;
-        }
+      ctx.fillStyle = 'rgba(0,0,0,0.85)';
+      ctx.fillRect(tx - padX, ty - textH + padY, textW + padX * 2, textH);
+      ctx.strokeStyle = '#00ffc3';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(tx - padX, ty - textH + padY, textW + padX * 2, textH);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, tx, ty);
 
-        // Donkere achtergrond + dunne outline + witte tekst
-        ctx.fillStyle = 'rgba(0,0,0,0.85)';
-        ctx.fillRect(lx, ly, textW + padX * 2, textH);
-        ctx.strokeStyle = '#22e38f';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(lx, ly, textW + padX * 2, textH);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(label, lx + padX, ly + textH - padY);
-    });
+    } else {
+      // === BOX tekenen (default) ===
+      const x = d.x1, y = d.y1, w = d.x2 - d.x1, h = d.y2 - d.y1;
+
+      ctx.fillStyle   = 'rgba(52,211,153,0.18)';
+      ctx.strokeStyle = '#22e38f';
+      ctx.lineWidth   = line;
+
+      ctx.fillRect(x, y, w, h);
+      ctx.shadowColor = 'rgba(0,0,0,0.7)';
+      ctx.shadowBlur  = 6;
+      ctx.strokeRect(x, y, w, h);
+      ctx.shadowBlur  = 0;
+
+      ctx.font = `${Math.max(12, Math.round(item.w / 50))}px system-ui, sans-serif`;
+      const padX = 8, padY = 5;
+      const textW = ctx.measureText(label).width;
+      const textH = parseInt(ctx.font, 10) + padY * 2;
+
+      let lx = x, ly = y - textH - 2;
+      if (ly < 0) ly = y + h + 2;
+      if (lx + textW + padX * 2 > item.canvas.width) {
+        lx = item.canvas.width - (textW + padX * 2) - 2;
+      }
+
+      ctx.fillStyle = 'rgba(0,0,0,0.85)';
+      ctx.fillRect(lx, ly, textW + padX * 2, textH);
+      ctx.strokeStyle = '#22e38f';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(lx, ly, textW + padX * 2, textH);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, lx + padX, ly + textH - padY);
+    }
+  });
 }
 
 // --- server detectie op één item ---
 // Stuurt een JPEG-encode van het canvas naar /api/detect en tekent het resultaat in.
 async function detectOnItemServer(item, conf, iou) {
-    // Canvas → JPEG-blob
-    const imgBlob = await new Promise(res => item.canvas.toBlob(res, "image/jpeg", 0.95));
+  // exporteer de kale bronafbeelding (geen overlays)
+  const off = document.createElement('canvas');
+  off.width = item.w; off.height = item.h;
+  const octx = off.getContext('2d');
+  octx.drawImage(item.imgEl, 0, 0, item.w, item.h);
+  const imgBlob = await new Promise(res => off.toBlob(res, "image/jpeg", 0.95));
 
-    // FormData voor upload
-    const fd = new FormData();
-    fd.append('file', new File([imgBlob], `${item.name || 'image'}.jpg`));
-    if (conf != null) fd.append('conf', String(conf));
-    if (iou  != null) fd.append('iou',  String(iou));
+  const fd = new FormData();
+  fd.append('file', new File([imgBlob], `${item.name || 'image'}.jpg`));
+  if (conf != null) fd.append('conf', String(conf));
+  if (iou  != null) fd.append('iou',  String(iou));
 
     let resp;
     try {
@@ -524,6 +607,9 @@ els.sample.onclick = async () => {
         "/static/samples/Screenshot from 2025-09-22 23-07-40.png",
         "/static/samples/Screenshot from 2025-09-22 23-08-08.png",
         "/static/samples/Screenshot from 2025-09-22 23-08-35.png",
+        "/static/samples/Screenshot from 2025-09-24 01-39-04.png",
+        "/static/samples/Screenshot from 2025-09-24 01-39-30.png",
+        "/static/samples/Screenshot from 2025-09-24 01-39-48.png",
     ];
     let i = 1;
     for (const u of urls) {
@@ -602,6 +688,11 @@ els.loadResume?.addEventListener('click', async () => {
         log(`Model laden mislukt: ${e.message}`);
     }
 });
+
+(async function initTrainerUI() {
+  await loadConfigAndModels();
+})();
+
 
 // Initiele UI-stand
 setStatus('Gereed', 'text-bg-secondary');
