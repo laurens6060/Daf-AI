@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="nl">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Afgekeurde producten</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- JSZip voor ZIP-export -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <style>
+    body {
+      background: #f6f7f9;
+    }
+
+    .navbar-brand {
+      text-decoration: underline;
+      text-decoration-color: red;
+      text-decoration-thickness: 3px
+    }
+  </style>
+</head>
+
+<body class="bg-light">
+  <nav class="navbar navbar-expand-lg bg-white border-bottom sticky-top">
+    <div class="container">
+      <a class="navbar-brand text-primary fw-semibold" href="/">Daf-Vision</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div id="nav" class="collapse navbar-collapse">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item"><a href="/" class="nav-link">Live Viewer</a></li>
+          <li class="nav-item"><a href="/products-ui" class="nav-link">products</a></li>
+          <li class="nav-item"><a href="/trainer" class="nav-link">Trainer</a></li>
+          <li class="nav-item"><a href="/contours" class="nav-link">Contours</a></li>
+          <li class="nav-item"><a href="/rejects" class="nav-link">Productiefout</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+  <div class="container py-4">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <h1 class="h4 mb-0">Afgekeurde producten</h1>
+      <div class="d-flex gap-2">
+        <button id="btnDelete" class="btn btn-outline-danger btn-sm" disabled>
+          Verwijderen (<span id="selCount1">0</span>)
+        </button>
+        <button id="btnZip" class="btn btn-outline-primary btn-sm" disabled>
+          Export ZIP (<span id="selCount2">0</span>)
+        </button>
+        <button id="btnCsv" class="btn btn-outline-secondary btn-sm" disabled>
+          CSV (<span id="selCount3">0</span>)
+        </button>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-body py-2 d-flex align-items-center gap-3 flex-wrap">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="checkAll">
+          <label class="form-check-label" for="checkAll">Alles selecteren</label>
+        </div>
+        <div class="text-muted small">
+          Totaal: <span id="totalCount">0</span>
+        </div>
+        <div id="statusMsg" class="small"></div>
+      </div>
+    </div>
+
+    <div id="grid" class="row g-3"></div>
+  </div>
+
+  <script>
+    (function () {
+      const grid = document.getElementById('grid');
+      const btnDelete = document.getElementById('btnDelete');
+      const btnZip = document.getElementById('btnZip');
+      const btnCsv = document.getElementById('btnCsv');
+      const sel1 = document.getElementById('selCount1');
+      const sel2 = document.getElementById('selCount2');
+      const sel3 = document.getElementById('selCount3');
+      const totalCount = document.getElementById('totalCount');
+      const checkAll = document.getElementById('checkAll');
+      const statusMsg = document.getElementById('statusMsg');
+
+      let items = [];          // alle rejects uit /api/rejects
+      let selected = new Set(); // ids geselecteerd in UI
+
+      const esc = s => String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
+
+      function setSelCount() {
+        const n = selected.size;
+        sel1.textContent = n; sel2.textContent = n; sel3.textContent = n;
+        btnDelete.disabled = n === 0;
+        btnZip.disabled = n === 0;
+        btnCsv.disabled = n === 0;
+      }
+
+      function render() {
+        grid.innerHTML = '';
+        totalCount.textContent = String(items.length);
+        if (!items.length) {
+          grid.innerHTML = '<div class="col-12 text-muted">Geen afgekeurde producten gevonden.</div>';
+          return;
+        }
+        for (const it of items) {
+          const mism = (it.mismatches || []).map(m => {
+            const name = m.name ?? m.property ?? 'property';
+            const exp = m.expected ?? '-';
+            const act = m.actual ?? '-';
+            return `${esc(name)}: verwacht ${esc(exp)}, gezien ${esc(act)}`;
+          }).join(' • ') || '—';
+
+          const card = document.createElement('div');
+          card.className = 'col-12 col-sm-6 col-md-4 col-lg-3';
+          card.innerHTML = `
+        <div class="card h-100 shadow-sm">
+          <div class="position-relative">
+            <img src="${esc(it.image_url)}" class="card-img-top" alt="reject">
+            
+          </div>
+          <div class="card-body">
+            <div class="d-flex justify-content-between mb-1">
+              <strong class="small">${esc(it.product_name || 'Onbekend')}</strong>
+              <span class="badge text-bg-danger">Afgekeurd</span>
+            </div>
+            <div class="small text-muted mb-2">${esc(it.iso || '')}</div>
+            <div class="small"><span class="text-muted">Fout(en):</span> ${mism}</div>
+
+            <div class="form-check bg-white rounded mt-2">
+              <input class="form-check-input selbox" type="checkbox" value="${esc(it.id)}" ${selected.has(it.id) ? 'checked' : ''}>
+            </div>
+          </div>
+          
+        </div>
+      `;
+          grid.appendChild(card);
+        }
+        bindCheckboxes();
+        setSelCount();
+      }
+
+      function bindCheckboxes() {
+        grid.querySelectorAll('.selbox').forEach(cb => {
+          cb.addEventListener('change', () => {
+            if (cb.checked) selected.add(cb.value);
+            else selected.delete(cb.value);
+            setSelCount();
+            // update master checkbox if needed
+            if (selected.size === items.length) checkAll.checked = true;
+            else checkAll.checked = false;
+          });
+        });
+      }
+
+      checkAll.addEventListener('change', () => {
+        selected.clear();
+        if (checkAll.checked) items.forEach(it => selected.add(it.id));
+        render();
+      });
+
+      async function load() {
+        statusMsg.textContent = 'Laden...';
+        try {
+          const r = await fetch('/api/rejects');
+          items = await r.json();
+          statusMsg.textContent = '';
+          render();
+        } catch (e) {
+          statusMsg.innerHTML = '<span class="text-danger">Kon /api/rejects niet laden.</span>';
+        }
+      }
+
+      // ——— Acties ———
+
+      // CSV (client-side)
+      function toCSV(selectedItems) {
+        const header = [
+          'id', 'datetime_iso', 'product_id', 'product_name', 'image_url', 'mismatch_summary'
+        ];
+        const rows = selectedItems.map(it => {
+          const mism = (it.mismatches || []).map(m => {
+            const name = m.name ?? m.property ?? 'property';
+            return `${name}:exp=${m.expected};act=${m.actual}`;
+          }).join('|');
+          return [
+            it.id, it.iso || '', it.product_id || '', it.product_name || '',
+            (location.origin + it.image_url), mism
+          ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+        });
+        return [header.join(','), ...rows].join('\n');
+      }
+
+      function downloadBlob(content, filename, mime) {
+        const blob = new Blob([content], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      btnCsv.addEventListener('click', () => {
+        const sel = items.filter(it => selected.has(it.id));
+        const csv = toCSV(sel);
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        downloadBlob(csv, `rejects_${ts}.csv`, 'text/csv;charset=utf-8');
+      });
+
+      // ZIP (client-side, JSZip)
+      btnZip.addEventListener('click', async () => {
+        const sel = items.filter(it => selected.has(it.id));
+        if (!sel.length) return;
+        statusMsg.textContent = 'Bezig met ZIP maken…';
+        try {
+          const zip = new JSZip();
+          for (const it of sel) {
+            // fetch image
+            const resp = await fetch(it.image_url);
+            const blob = await resp.blob();
+            // nice filename
+            const safeName = (it.product_name || 'product').replace(/[^\w.-]+/g, '_');
+            const fn = `${it.iso?.replace(/[: ]/g, '_') || 'tijd'}_${safeName}.jpg`;
+            zip.file(fn, blob);
+            zip.file(fn.replace(/\.jpg$/i, '_metadata.json'), JSON.stringify(it, null, 2));
+          }
+          const content = await zip.generateAsync({ type: 'blob' });
+          const ts = new Date().toISOString().replace(/[:.]/g, '-');
+          downloadBlob(content, `rejects_${ts}.zip`, 'application/zip');
+          statusMsg.textContent = '';
+        } catch (e) {
+          statusMsg.innerHTML = '<span class="text-danger">ZIP maken mislukt.</span>';
+        }
+      });
+
+      // Verwijderen (server-side)
+      btnDelete.addEventListener('click', async () => {
+        const ids = Array.from(selected);
+        if (!ids.length) return;
+        if (!confirm(`Weet je zeker dat je ${ids.length} item(s) wilt verwijderen?`)) return;
+        statusMsg.textContent = 'Verwijderen…';
+        try {
+          const r = await fetch('/api/rejects/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids })
+          });
+          if (!r.ok) {
+            // graceful fallback indien endpoint nog niet bestaat
+            statusMsg.innerHTML = '<span class="text-danger">Endpoint /api/rejects/delete ontbreekt of faalt.</span>';
+            return;
+          }
+          const res = await r.json();
+          const okIds = new Set(res.deleted || ids);
+          items = items.filter(it => !okIds.has(it.id));
+          for (const id of okIds) selected.delete(id);
+          statusMsg.textContent = '';
+          render();
+        } catch (e) {
+          statusMsg.innerHTML = '<span class="text-danger">Verwijderen mislukt.</span>';
+        }
+      });
+
+      // init
+      load();
+    })();
+  </script>
+</body>
+
+</html>

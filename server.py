@@ -43,6 +43,9 @@ import socket
 import webbrowser
 import re
 
+#from pyueye import ueye
+import sys
+
 # ------------------------------
 # # Ip adres zoeken / webbrowser automatisch openen
 # ------------------------------
@@ -69,6 +72,156 @@ def _open_browser_soon(url: str, delay: float = 1.5):
     threading.Timer(delay, _go).start()
 
 # ------------------------------
+# uEye init
+# ------------------------------
+# def _ueye_init():
+#     global pcImageMemory, ueye_width, ueye_height, nBitsPerPixel, pitch, bytes_per_pixel, nRet
+#
+#     # uEye globals
+#     hCam = ueye.HIDS(0)
+#     pcImageMemory = ueye.c_mem_p()
+#     MemID = ueye.int()
+#     ueye_width = ueye.INT()
+#     ueye_height = ueye.INT()
+#     nBitsPerPixel = ueye.INT()
+#     pitch = ueye.INT()
+#     bytes_per_pixel = 0
+#
+#     #Variables
+#     hCam = ueye.HIDS(0)             #0: first available camera
+#     sInfo = ueye.SENSORINFO()
+#     cInfo = ueye.CAMINFO()
+#     #pcImageMemory = ueye.c_mem_p()
+#     MemID = ueye.int()
+#     rectAOI = ueye.IS_RECT()
+#     #pitch = ueye.INT()
+#     #nBitsPerPixel = ueye.INT(24)    #24: bits per pixel for color mode; take 8 bits per pixel for monochrome
+#     channels = 3                    #3: channels for color mode(RGB); take 1 channel for monochrome
+#     m_nColorMode = ueye.INT()		# Y8/RGB16/RGB24/REG32
+#     #bytes_per_pixel = int(nBitsPerPixel / 8)
+#
+#     # Starts the driver and establishes the connection to the camera
+#     nRet = ueye.is_InitCamera(hCam, None)
+#     if nRet != ueye.IS_SUCCESS:
+#         print("is_InitCamera ERROR")
+#     # Reads out the data hard-coded in the non-volatile camera memory and writes it to the data structure that cInfo points to
+#     nRet = ueye.is_GetCameraInfo(hCam, cInfo)
+#     if nRet != ueye.IS_SUCCESS:
+#         print("is_GetCameraInfo ERROR")
+#     # You can query additional information about the sensor type used in the camera
+#     nRet = ueye.is_GetSensorInfo(hCam, sInfo)
+#     if nRet != ueye.IS_SUCCESS:
+#         print("is_GetSensorInfo ERROR")
+#     nRet = ueye.is_ResetToDefault( hCam)
+#     if nRet != ueye.IS_SUCCESS:
+#         print("is_ResetToDefault ERROR")
+#
+#     # Set display mode to DIB
+#     nRet = ueye.is_SetDisplayMode(hCam, ueye.IS_SET_DM_DIB)
+#
+#     # Set the right color mode
+#     if int.from_bytes(sInfo.nColorMode.value, byteorder='big') == ueye.IS_COLORMODE_BAYER:
+#         # setup the color depth to the current windows setting
+#         ueye.is_GetColorDepth(hCam, nBitsPerPixel, m_nColorMode)
+#         bytes_per_pixel = int(nBitsPerPixel / 8)
+#         print("IS_COLORMODE_BAYER: ", )
+#
+#     elif int.from_bytes(sInfo.nColorMode.value, byteorder='big') == ueye.IS_COLORMODE_CBYCRY:
+#         # for color camera models use RGB32 mode
+#         m_nColorMode = ueye.IS_CM_BGRA8_PACKED
+#         nBitsPerPixel = ueye.INT(32)
+#         bytes_per_pixel = int(nBitsPerPixel / 8)
+#         print("IS_COLORMODE_CBYCRY: ", )
+#
+#     elif int.from_bytes(sInfo.nColorMode.value, byteorder='big') == ueye.IS_COLORMODE_MONOCHROME:
+#         # for color camera models use RGB32 mode
+#         m_nColorMode = ueye.IS_CM_MONO8
+#         nBitsPerPixel = ueye.INT(8)
+#         bytes_per_pixel = int(nBitsPerPixel / 8)
+#         print("IS_COLORMODE_MONOCHROME: ", )
+#
+#     else:
+#         # for monochrome camera models use Y8 mode
+#         m_nColorMode = ueye.IS_CM_MONO8
+#         nBitsPerPixel = ueye.INT(8)
+#         bytes_per_pixel = int(nBitsPerPixel / 8)
+#         print("else")
+#
+#     print("- m_nColorMode: \t", m_nColorMode)
+#     print("- nBitsPerPixel: \t", nBitsPerPixel)
+#     print("- bytes_per_pixel: \t", bytes_per_pixel)
+#     print()
+#
+#     # Can be used to set the size and position of an "area of interest"(AOI) within an image
+#     nRet = ueye.is_AOI(hCam, ueye.IS_AOI_IMAGE_GET_AOI, rectAOI, ueye.sizeof(rectAOI))
+#     if nRet != ueye.IS_SUCCESS:
+#         print("is_AOI ERROR")
+#
+#     ueye_width = rectAOI.s32Width
+#     ueye_height = rectAOI.s32Height
+#
+#     # Prints out some information about the camera and the sensor
+#     print("Camera model:\t\t", sInfo.strSensorName.decode('utf-8'))
+#     print("Camera serial no.:\t", cInfo.SerNo.decode('utf-8'))
+#     print("Maximum image width:\t", ueye_width)
+#     print("Maximum image height:\t", ueye_height)
+#     print()
+#     # TODO Downscale
+#     #ueye_width = ueye.c_int(int(ueye_width/4))
+#     #ueye_height = ueye.c_int(int(ueye_height/4))
+#     print(type(ueye_width))
+#     print(type(ueye_height))
+#
+#     # Allocates an image memory for an image having its dimensions defined by width and height and its color depth defined by nBitsPerPixel
+#     nRet = ueye.is_AllocImageMem(hCam, ueye_width, ueye_height, nBitsPerPixel, pcImageMemory, MemID)
+#     if nRet != ueye.IS_SUCCESS:
+#         print("is_AllocImageMem ERROR")
+#     else:
+#         # Makes the specified image memory the active memory
+#         nRet = ueye.is_SetImageMem(hCam, pcImageMemory, MemID)
+#         if nRet != ueye.IS_SUCCESS:
+#             print("is_SetImageMem ERROR")
+#         else:
+#             # Set the desired color mode
+#             nRet = ueye.is_SetColorMode(hCam, m_nColorMode)
+#
+#
+#     # Activates the camera's live video mode (free run mode)
+#     nRet = ueye.is_CaptureVideo(hCam, ueye.IS_DONT_WAIT)
+#     if nRet != ueye.IS_SUCCESS:
+#         print("is_CaptureVideo ERROR")
+#
+#     # Enables the queue mode for existing image memory sequences
+#     nRet = ueye.is_InquireImageMem(hCam, pcImageMemory, MemID, ueye_width, ueye_height, nBitsPerPixel, pitch)
+#     if nRet != ueye.IS_SUCCESS:
+#         print("is_InquireImageMem ERROR")
+#     else:
+#         print("ueye init complete")
+
+
+
+
+# ------------------------------
+# Tijdelijk oplossing om screenshots te maken, zal niet gebruikt worden in productie
+# ------------------------------
+SNAP_DIR = Path("snapshots")
+SNAP_DIR.mkdir(parents=True, exist_ok=True)
+SNAPSHOT_MIN_INTERVAL = 2.0  # seconds between saves
+_last_snap_ts = 0.0
+_was_present = False
+
+def _save_detection_snapshot(annotated: np.ndarray, items: list[tuple[str, float]]):
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    top = max(items, key=lambda t: t[1], default=("det", 0.0))
+    label, conf = top[0], top[1]
+    fname = f"{ts}_{label}_{int(conf*100)}.jpg"
+    fpath = SNAP_DIR / fname
+    try:
+        cv2.imwrite(str(fpath), annotated)
+    except Exception as e:
+        print(f"[snapshot] failed to save {fpath}: {e}")
+
+# ------------------------------
 # Defaults / tunables
 # ------------------------------
 DEFAULT_IMGSZ = 640
@@ -87,8 +240,10 @@ if not Path(TRACKER_CFG).exists():
 
 AVAILABLE_MODELS: Dict[str, str] = {
     "yolov8n": "yolov8n.pt",
+    "yolo11n": "yolo11n.pt",
     "yolov8s": "yolov8s.pt",
     "yolov8n-seg": "yolov8n-seg.pt",
+    "yolo11n-seg": "yolo11n-seg.pt",
     "yolov8s-seg": "yolov8s-seg.pt",
 }
 
@@ -119,6 +274,10 @@ class AppConfig(BaseModel):
     min_hits: int = Field(default=DEFAULT_MIN_HITS)
     ema_alpha: float = Field(default=DEFAULT_EMA_ALPHA, ge=0.0, le=1.0)
     show_masks: bool = True
+    show_boxes: bool = True
+    contour_match_enabled: bool = True
+    contour_match_class: str = "hole"
+    contour_match_iop: float = 0.60
 
 config = AppConfig()
 
@@ -246,7 +405,21 @@ ws_clients: List[WebSocket] = []
 frame_q: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=1)
 main_loop: asyncio.AbstractEventLoop | None = None
 
+_infer_thread: Optional[threading.Thread] = None
+_cv2_thread: Optional[threading.Thread] = None
+
 track_states: Dict[int, Dict] = {}  # per track-id: label, bbox, conf, hits, last_ts
+
+# ------------------------------
+# Globale staat voor ueye camera
+# ------------------------------
+pcImageMemory = None
+ueye_width = 640
+ueye_height = 480
+nBitsPerPixel = 24
+pitch = 0
+bytes_per_pixel = 0
+nRet = None
 
 # ------------------------------
 # Helpers (EMA, filters)
@@ -389,10 +562,58 @@ def draw_mask_polygons(annotated: np.ndarray, polys: list[np.ndarray], color_bgr
         cv2.polylines(overlay, [pts], isClosed=True, color=color_bgr, thickness=2)
     cv2.addWeighted(overlay, alpha, annotated, 1 - alpha, 0, dst=annotated)
 
+def cv2_loop():
+    print("start cv2_loop")
+    global latest_frame, latest_detections, track_states
+    global pcImageMemory, ueye_width, ueye_height, nBitsPerPixel, pitch, bytes_per_pixel
 
+    # _ueye_init()
+
+    # cache plain ints
+    w = int(ueye_width.value if hasattr(ueye_width, "value") else ueye_width)
+    h = int(ueye_height.value if hasattr(ueye_height, "value") else ueye_height)
+    bpp = int(nBitsPerPixel.value if hasattr(nBitsPerPixel, "value") else nBitsPerPixel)
+    pitch_val = int(pitch.value if hasattr(pitch, "value") else pitch)
+    ch = int(bpp // 8)
+
+    # while True:
+    #     try:
+    #         array = ueye.get_data(pcImageMemory, w, h, bpp, pitch_val, copy=False)
+    #     except Exception as e:
+    #         print("[uEye] get_data failed:", e)
+    #         time.sleep(0.05)
+    #         continue
+    #
+    #     try:
+    #         frame = np.reshape(array, (h, w, ch)) if ch >= 1 else np.reshape(array, (h, w))
+    #     except Exception as e:
+    #         print("[uEye] reshape failed:", e)
+    #         time.sleep(0.01)
+    #         continue
+    #
+    #     # normalize to 3-channel BGR
+    #     if frame.ndim == 2 or (frame.ndim == 3 and frame.shape[2] == 1):
+    #         frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    #     elif frame.ndim == 3 and frame.shape[2] == 4:
+    #         frame = frame[:, :, :3]
+    #
+    #     # optional scale-down
+    #     frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+    #
+    #     try:
+    #         if frame_q.full():
+    #             frame_q.get_nowait()
+    #         frame_q.put_nowait(frame)
+    #     except queue.Full:
+    #         pass
+
+
+#_worker = threading.Thread(target=cv2_loop, daemon=True)
+#_worker.start()
 
 def infer_loop():
     global latest_frame, latest_detections, track_states
+
     while True:
         img = frame_q.get()
         now = time.time()
@@ -400,14 +621,17 @@ def infer_loop():
         active_objs = get_all_active_model_objs()
         if not active_objs:
             latest_frame = img
+            latest_detections = []
+            # still broadcast empties if you want; for now just continue
             continue
 
         primary = active_objs[0]
         others  = active_objs[1:]
         tracker_cfg = TRACKER_CFG if Path(TRACKER_CFG).exists() else "bytetrack.yaml"
 
-        # 1) PRIMARY: track() -> update tracking state + primaire dets
+        # 1) PRIMARY: track() -> tracking-state & primary dets
         primary_dets = []
+        primary_polys = []  # [(label, [poly_xy])]
         try:
             r = primary.track(
                 img,
@@ -426,16 +650,16 @@ def infer_loop():
         if r is not None and r.boxes is not None and len(r.boxes):
             boxes = r.boxes
             ids = boxes.id
-            names = primary.names if hasattr(primary, 'names') else {}
+            names = getattr(primary, "names", {})
             for i in range(len(boxes)):
                 cls_i = int(boxes.cls[i].item())
-                label = (names[cls_i] if isinstance(names, dict) and cls_i in names else str(cls_i))
+                label = names.get(cls_i, str(cls_i)) if isinstance(names, dict) else str(cls_i)
                 if not allowed_filter(label):
                     continue
                 conf_i = float(boxes.conf[i].item() if boxes.conf is not None else 0.0)
                 x1, y1, x2, y2 = map(int, boxes.xyxy[i].tolist())
 
-                # tracking state (alleen primary)
+                # update tracking state (primary only)
                 if ids is not None and ids[i] is not None:
                     obj_id = int(ids[i].item())
                     st = track_states.get(obj_id)
@@ -451,23 +675,23 @@ def infer_loop():
 
                 primary_dets.append({"xyxy": (x1, y1, x2, y2), "conf": conf_i, "label": label, "src": "primary"})
 
-        primary_polys = []  # lijst van (label, polys)
+        # primary masks (if seg)
         if r is not None and getattr(r, "masks", None) is not None and r.masks is not None:
-            # r.masks.xy is een lijst; index i correspondeert met boxes i
             try:
                 masks_xy = r.masks.xy  # List[np.ndarray Nx2]
             except Exception:
                 masks_xy = None
-            if masks_xy:
-                names = primary.names if hasattr(primary, 'names') else {}
+            if masks_xy and r.boxes is not None:
+                names = getattr(primary, "names", {})
                 for i, poly in enumerate(masks_xy):
-                    cls_i = int(r.boxes.cls[i].item()) if r.boxes is not None else None
-                    label = (names.get(cls_i, str(cls_i)) if isinstance(names, dict) else str(cls_i))
+                    cls_i = int(r.boxes.cls[i].item())
+                    label = names.get(cls_i, str(cls_i)) if isinstance(names, dict) else str(cls_i)
                     if not allowed_filter(label):
                         continue
-                    primary_polys.append((label, [poly]))
+                    if poly is not None and len(poly) >= 3:
+                        primary_polys.append((label, [poly]))
 
-        # hold_ms cleanup (tracking blijft ongewijzigd)
+        # hold_ms expiry for tracks
         expire = []
         for obj_id, st in list(track_states.items()):
             if (now - float(st["last_ts"])) * 1000.0 > config.hold_ms:
@@ -475,10 +699,9 @@ def infer_loop():
         for obj_id in expire:
             track_states.pop(obj_id, None)
 
-        # 2) OTHERS: predict() en verzamel dets + masks
+        # 2) OTHERS: predict()
         extra_dets = []
         extra_polys = []
-
         for m in others:
             try:
                 res = m.predict(
@@ -492,107 +715,174 @@ def infer_loop():
             if res.boxes is None or len(res.boxes) == 0:
                 continue
 
-            names = m.names if hasattr(m, 'names') else {}
+            names = getattr(m, "names", {})
 
             # boxes
             for k in range(len(res.boxes)):
                 cls_k = int(res.boxes.cls[k].item())
-                label_k = (names[cls_k] if isinstance(names, dict) and cls_k in names else str(cls_k))
+                label_k = names.get(cls_k, str(cls_k)) if isinstance(names, dict) else str(cls_k)
                 if not allowed_filter(label_k):
                     continue
                 conf_k = float(res.boxes.conf[k].item() if res.boxes.conf is not None else 0.0)
                 x1, y1, x2, y2 = map(int, res.boxes.xyxy[k].tolist())
                 extra_dets.append({"xyxy": (x1, y1, x2, y2), "conf": conf_k, "label": label_k, "src": "extra"})
 
-            # masks (optioneel per seg-model)
+            # masks (seg)
             if getattr(res, "masks", None) is not None and res.masks is not None:
                 try:
-                    masks_xy = res.masks.xy  # List[np.ndarray]
+                    masks_xy = res.masks.xy
                 except Exception:
                     masks_xy = None
                 if masks_xy:
                     for k, poly in enumerate(masks_xy):
                         cls_k = int(res.boxes.cls[k].item()) if res.boxes is not None else None
-                        label_k = (names.get(cls_k, str(cls_k)) if isinstance(names, dict) else str(cls_k))
+                        label_k = names.get(cls_k, str(cls_k)) if isinstance(names, dict) else str(cls_k)
                         if not allowed_filter(label_k):
                             continue
-                        extra_polys.append((label_k, [poly]))
+                        if poly is not None and len(poly) >= 3:
+                            extra_polys.append((label_k, [poly]))
 
-
-        # 3) SAMENVOEGEN via per-klasse NMS
+        # 3) merge via per-class NMS
         combined = nms_per_class(primary_dets + extra_dets, iou_thr=float(config.iou))
 
-        # 4) TEKENEN
+        # 4) draw
+        # 4) draw
         annotated = img.copy()
-
-        # (a) Teken tracking-boxen (primary, gestabiliseerd met EMA/min_hits)
         table_items: List[tuple[str, float]] = []
         active_labels: List[str] = []
 
+        # i.p.v. direct tekenen: verzamel draw-opdrachten
+        box_draw_cmds = []  # tuples: (kind, (x1,y1,x2,y2), label, conf)
+
+        # (a) tracked boxes (stabilized)
         for st in track_states.values():
             if st["hits"] < config.min_hits:
                 continue
             tx1, ty1, tx2, ty2 = map(int, st["bbox"])
             tlabel = st["label"]
-            tconf  = float(st["conf"])
-            cv2.rectangle(annotated, (tx1, ty1), (tx2, ty2), (0, 255, 0), 2)
-            cv2.putText(annotated, f"{tlabel} {tconf*100:.0f}%", (tx1, max(0, ty1-6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+            tconf = float(st["conf"])
+            box_draw_cmds.append(("tracked", (tx1, ty1, tx2, ty2), tlabel, tconf))
             table_items.append((tlabel, tconf))
             active_labels.append(tlabel)
 
-        # (b) Dedup combined t.o.v. getrackte boxen en teken rest (oranje)
+        # (b) dedup combined vs tracked
         tracked_xyxy = [tuple(map(int, st["bbox"])) for st in track_states.values()
                         if st["hits"] >= config.min_hits]
-
-        if tracked_xyxy:
-            dedup_combined = [d for d in combined if all(_iou_xyxy(d['xyxy'], txy) < 0.5 for txy in tracked_xyxy)]
-        else:
-            dedup_combined = combined
+        dedup_combined = [d for d in combined if all(_iou_xyxy(d['xyxy'], txy) < 0.5 for txy in tracked_xyxy)] \
+            if tracked_xyxy else combined
 
         for d in dedup_combined:
             x1, y1, x2, y2 = map(int, d['xyxy'])
-            label = d['label']
-            conf  = float(d['conf'])
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 180, 255), 2)
-            cv2.putText(annotated, f"{label} {conf*100:.0f}%", (x1, max(0, y1-6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,180,255), 2)
+            label = d['label'];
+            conf = float(d['conf'])
+            box_draw_cmds.append(("combined", (x1, y1, x2, y2), label, conf))
             table_items.append((label, conf))
             active_labels.append(label)
 
-        # 4c) Masks tekenen (indien show_masks=True en model levert masks)
+        # (c) masks
         if getattr(config, "show_masks", True):
-            # Teken eerst primary masks (zelfde kleur per label)
             for label, polys in primary_polys:
                 draw_mask_polygons(annotated, polys, _color_for_label(label), alpha=0.35)
-
-            # Teken extra model masks
             for label, polys in extra_polys:
                 draw_mask_polygons(annotated, polys, _color_for_label(label), alpha=0.25)
 
-        # 5) Publiceer resultaten
-        latest_frame = annotated
-        latest_detections = table_items
+        # (d) contour matching (IoP)
+        contour_hits = []
+        matched_product_ids = set()
+        match_regions = []  # <-- bboxen van succesvolle templates
+        try:
+            if getattr(config, "contour_match_enabled", True):
+                h, w = annotated.shape[:2]
+                templates = _load_contours()
+                thr = float(getattr(config, "contour_match_iop", 0.60))
 
+                # (optioneel) templates visueel tonen
+                for t in templates:
+                    tpl_xy = _denorm_poly(t.get("polygon01", []), w, h)
+                    if len(tpl_xy) >= 3:
+                        cv2.polylines(annotated, [np.asarray(tpl_xy, np.int32)], True, (255, 255, 0), 2)
+
+                # matchen tegen ALLE mask-polys die er zijn
+                hole_polys = [p for _, polys in (primary_polys + extra_polys) for p in polys if
+                              p is not None and len(p) >= 3]
+
+                for t in templates:
+                    tpl_xy = _denorm_poly(t.get("polygon01", []), w, h)
+                    if len(tpl_xy) < 3:
+                        continue
+                    best = 0.0
+                    for hp in hole_polys:
+                        iop = _poly_iop(tpl_xy, hp, w, h)
+                        if iop > best:
+                            best = iop
+                    if best >= thr:
+                        contour_hits.append({"type_key": t.get("type_key"), "iop": round(best, 3),
+                                             **({"product_id": t.get("product_id") or t.get("productId")}
+                                                if (t.get("product_id") or t.get("productId")) else {})})
+                        if t.get("product_id") or t.get("productId"):
+                            matched_product_ids.add(t.get("product_id") or t.get("productId"))
+
+                        # groen omranding + label
+                        cv2.polylines(annotated, [np.asarray(tpl_xy, np.int32)], True, (0, 255, 0), 3)
+                        cv2.putText(annotated, f"match {t.get('type_key')} ({best * 100:.0f}%)",
+                                    tuple(tpl_xy[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+                        # <-- sla de bbox van deze template op om box-tekst te kunnen onderdrukken
+                        rx, ry, rw, rh = cv2.boundingRect(np.asarray(tpl_xy, np.int32))
+                        match_regions.append((rx, ry, rx + rw, ry + rh))
+        except Exception as e:
+            print(f"[contours] match error: {e}")
+
+        # (e) teken nu de boxen; onderdruk tekst wanneer overlapt met match-regio
+        if config.show_boxes:
+            for kind, (x1, y1, x2, y2), label, conf in box_draw_cmds:
+                color = (0, 255, 0) if kind == "tracked" else (0, 180, 255)
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                # onderdruk als IoU met eender welke match-regio >= 0.30
+                suppress = any(_iou_xyxy((x1, y1, x2, y2), mr) >= 0.30 for mr in match_regions)
+                if not suppress:
+                    cv2.putText(annotated, f"{label} {conf * 100:.0f}%",
+                                (x1, max(0, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+        # 5) snapshot (optional)
+        try:
+            primary_keys = get_active_models()
+            primary_key = primary_keys[0] if primary_keys else ""
+            using_schijfrem = "schijfrem_yolo8n.pt" in os.path.basename(str(primary_key))
+            global _was_present, _last_snap_ts
+            present_now = bool(table_items)
+            if using_schijfrem and present_now and not _was_present:
+                _save_detection_snapshot(img, table_items)
+                _last_snap_ts = now
+            _was_present = present_now
+        except Exception as e:
+            print(f"[snapshot] error: {e}")
+
+        # 6) compute present + publish (single WS send)
         present = Counter(active_labels)
         present_list = [{"label": k, "count": int(v)} for k, v in sorted(present.items())]
 
+        latest_frame = annotated
+        latest_detections = table_items
+
         if main_loop and main_loop.is_running():
             try:
-                items_payload = [{"label": l, "conf": round(c*100, 1)} for (l, c) in table_items]
-                asyncio.run_coroutine_threadsafe(
-                    broadcast_ws({
-                        "type": "detections",
-                        "items": items_payload,
-                        "present": present_list
-                    }),
-                    main_loop
-                )
+                items_payload = [{"label": l, "conf": round(c * 100, 1)} for (l, c) in table_items]
+                payload = {
+                    "type": "detections",
+                    "items": items_payload,
+                    "present": present_list
+                }
+                if contour_hits:
+                    payload["contours"] = contour_hits
+                    payload["matched_product_ids"] = list(matched_product_ids)
+                asyncio.run_coroutine_threadsafe(broadcast_ws(payload), main_loop)
             except Exception:
                 pass
 
-_worker = threading.Thread(target=infer_loop, daemon=True)
-_worker.start()
+
+#_worker = threading.Thread(target=infer_loop, daemon=True)
+#_worker.start()
 
 # ------------------------------
 # WebRTC videoinput sink
@@ -657,6 +947,16 @@ async def axles_html_redirect():
 @app.get("/products-ui", response_class=HTMLResponse)
 async def products_ui(request: Request):
     return templates.TemplateResponse("products.html", {"request": request})
+
+@app.get("/contours", response_class=HTMLResponse)
+async def products_ui(request: Request):
+    return templates.TemplateResponse("contours.html", {"request": request})
+
+@app.get("/rejects", response_class=HTMLResponse)
+async def rejects_page(request: Request):
+ return templates.TemplateResponse("rejects.html", {"request": request})
+
+
 
 # ------------------------------
 # WebSocket endpoint viewer
@@ -763,6 +1063,10 @@ class ConfigUpdate(BaseModel):
     min_hits: Optional[int] = None
     ema_alpha: Optional[float] = None
     show_masks: Optional[bool] = None
+    show_boxes: Optional[bool] = None
+    contour_match_enabled: Optional[bool] = None
+    contour_match_class: Optional[str] = None
+    contour_match_iop: Optional[float] = None
 
 @app.get("/api/config")
 async def get_config():
@@ -792,6 +1096,10 @@ async def update_config(body: ConfigUpdate):
     if body.min_hits  is not None: config.min_hits  = int(body.min_hits)
     if body.ema_alpha is not None: config.ema_alpha = float(body.ema_alpha)
     if body.show_masks is not None: config.show_masks = bool(body.show_masks)
+    if body.show_boxes is not None: config.show_boxes = bool(body.show_boxes)
+    if body.contour_match_enabled is not None: config.contour_match_enabled = bool(body.contour_match_enabled)
+    if body.contour_match_class is not None:   config.contour_match_class = str(body.contour_match_class)
+    if body.contour_match_iop is not None:     config.contour_match_iop = float(body.contour_match_iop)
 
     msg = {
         "type": "config",
@@ -1049,7 +1357,7 @@ def _run_train(
                 base_key = _short_base_key(base_weights)  # bv. 'yolov8n' of 'yolov8n-seg'
                 short_name = f"{class_name}_{base_key}.pt"
 
-                # optioneel: stuur seg-modellen standaard naar runs/segment i.p.v. runs/exported
+                # Optioneel: stuur seg-modellen standaard naar runs/segment i.p.v. runs/exported
                 # (alleen als export_dir leeg gelaten wordt aan de UI-kant)
                 # if export_dir is None:
                 #     out_dir = Path("runs/segment" if "-seg" in base_key else "runs/exported")
@@ -1202,6 +1510,22 @@ DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 PRODUCTS_DB = DATA_DIR / "products.json"
 COLLECTIONS_DB = DATA_DIR / "collections.json"
+CONTOURS_DB = DATA_DIR / "contours.json"
+
+def _load_contours() -> list[dict]:
+    return _load_json(CONTOURS_DB)
+
+def _save_contours(items: list[dict]) -> None:
+    _save_json(CONTOURS_DB, items)
+
+def _norm_poly(points: list[list[float]], w: int, h: int) -> list[list[float]]:
+    # absolute px -> normalized [0..1]
+    return [[max(0.0, min(1.0, x / float(w))), max(0.0, min(1.0, y / float(h)))] for x, y in points]
+
+def _denorm_poly(points01: list[list[float]], w: int, h: int) -> list[list[int]]:
+    # normalized -> absolute px (ints)
+    return [[int(round(x * w)), int(round(y * h))] for x, y in points01]
+
 
 def _load_json(p: Path) -> list[dict]:
     if not p.exists():
@@ -1429,13 +1753,178 @@ async def save_masks(payload: SaveMasksReq):
     label_path.write_text("\n".join(lines), encoding="utf-8")
     return {"ok": True, "label_path": str(label_path)}
 
+class Contour(BaseModel):
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    name: str                      # e.g. "Type 1"
+    type_key: str                  # machine label you’ll map to product type (e.g. "type1")
+    image_name: Optional[str] = None  # original reference filename (optional)
+    width: int
+    height: int
+    polygon01: List[List[float]]   # normalized [[x,y]...]
+    product_id: Optional[str] = None
+
+def _poly_iop(template_poly_xy: list[list[int]], mask_poly_xy: list[list[float]], w: int, h: int) -> float:
+    """
+    IoP = area(intersection) / area(template_polygon)
+    Args are in frame coordinates (pixels).
+    """
+    if len(template_poly_xy) < 3 or len(mask_poly_xy) < 3:
+        return 0.0
+    tpl = np.zeros((h, w), dtype=np.uint8)
+    msk = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillPoly(tpl, [np.asarray(template_poly_xy, dtype=np.int32)], 255)
+    cv2.fillPoly(msk, [np.asarray(mask_poly_xy, dtype=np.int32)], 255)
+    inter = cv2.bitwise_and(tpl, msk)
+    area_tpl = int(cv2.countNonZero(tpl))
+    if area_tpl <= 0:
+        return 0.0
+    area_inter = int(cv2.countNonZero(inter))
+    return float(area_inter) / float(area_tpl + 1e-6)
+
+
+@app.get("/api/contours")
+async def api_list_contours():
+    return _load_contours()
+
+@app.post("/api/contours")
+async def create_contour(c: Contour):
+    items = _load_contours()
+    items.append(c.model_dump())
+    _save_contours(items)
+    return c
+
+@app.put("/contours/{cid}")
+async def update_contour(cid: str, payload: dict):
+    items = _load_contours()
+    for i, it in enumerate(items):
+        if it.get("id") == cid:
+            it.update({k: v for k, v in payload.items()
+                       if k in ("name","type_key","polygon01","width","height","image_name","product_id")})  # <—
+            items[i] = it
+            _save_contours(items)
+            return it
+    return JSONResponse({"error": "Not found"}, status_code=404)
+
+@app.delete("/api/contours/{cid}")
+async def api_delete_contour(cid: str):
+    items = _load_contours()
+    new = [it for it in items if it.get("id") != cid]
+    if len(new) == len(items):
+        return JSONResponse({"error":"Not found"}, status_code=404)
+    _save_contours(new)
+    return {"ok": True, "deleted": cid}
+
+@app.get("/contours-ui", response_class=HTMLResponse)
+async def contours_ui(request: Request):
+    return templates.TemplateResponse("contours.html", {"request": request})
+
+# --- Rejects opslag ---
+REJECTS_DIR = UPLOAD_ROOT / "rejects"
+REJECTS_DIR.mkdir(parents=True, exist_ok=True)
+REJECTS_DB = DATA_DIR / "rejects.json"
+
+def _load_rejects() -> list[dict]:
+    return _load_json(REJECTS_DB)
+
+def _save_rejects(items: list[dict]) -> None:
+    _save_json(REJECTS_DB, items)
+
+from datetime import datetime
+
+class RejectIn(BaseModel):
+    product_id: str
+    product_name: str
+    mismatches: list[dict] = Field(default_factory=list)  # [{name, expected, actual}]
+    expected_properties: dict[str, AllowedVal] = Field(default_factory=dict)
+    present_counts: dict[str, int] = Field(default_factory=dict)
+
+@app.post("/api/rejects")
+async def api_rejects_add(payload: RejectIn):
+    # 1) pak laatste frame
+    global latest_frame
+    frame = latest_frame
+    if frame is None:
+        return JSONResponse({"error": "No frame available"}, status_code=409)
+
+    # 2) schrijf jpg
+    ts = time.time()
+    stamp = datetime.fromtimestamp(ts).strftime("%Y%m%d_%H%M%S")
+    fname = f"reject_{stamp}_{uuid4().hex[:8]}.jpg"
+    fpath = REJECTS_DIR / fname
+    try:
+        ok = cv2.imwrite(str(fpath), frame)
+        if not ok:
+            return JSONResponse({"error": "Failed to write image"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"error": f"Save error: {e}"}, status_code=500)
+
+    # 3) record in DB
+    items = _load_rejects()
+    rec = {
+        "id": uuid4().hex,
+        "ts": int(ts),
+        "iso": datetime.fromtimestamp(ts).isoformat(timespec="seconds"),
+        "product_id": payload.product_id,
+        "product_name": payload.product_name,
+        "image_url": f"/uploads/rejects/{fname}",
+        "mismatches": payload.mismatches,
+        "expected_properties": payload.expected_properties,
+        "present_counts": payload.present_counts,
+    }
+    items.append(rec)
+    _save_rejects(items)
+    return {"ok": True, "record": rec}
+
+@app.get("/api/rejects")
+async def api_rejects_list():
+    items = _load_rejects()
+    # nieuwste eerst
+    items.sort(key=lambda x: x.get("ts", 0), reverse=True)
+    return items
+
+@app.get("/rejects-ui", response_class=HTMLResponse)
+async def rejects_ui(request: Request):
+    return templates.TemplateResponse("rejects.html", {"request": request})
+
+class RejectsDeleteIn(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+
+@app.post("/api/rejects/delete")
+async def api_rejects_delete(payload: RejectsDeleteIn):
+    items = _load_rejects()
+    keep = [it for it in items if it.get("id") not in set(payload.ids)]
+    deleted = [it.get("id") for it in items if it.get("id") not in {x.get("id") for x in keep}]
+    _save_rejects(keep)
+    # (optioneel: verwijder ook de bijhorende images)
+    for it in items:
+      if it.get("id") in deleted:
+        try:
+          p = Path("." + it.get("image_url")).resolve()
+          if p.exists():
+            p.unlink(missing_ok=True)
+        except Exception:
+          pass
+    return {"ok": True, "deleted": deleted}
+
+
 # ------------------------------
 # Lifecycle hook
 # ------------------------------
 @app.on_event("startup")
 async def _on_startup():
-    global main_loop
+    global main_loop, _infer_thread, _cv2_thread
     main_loop = asyncio.get_running_loop()
+
+    # start the infer loop if not running
+    if _infer_thread is None or not _infer_thread.is_alive():
+        _infer_thread = threading.Thread(target=infer_loop, daemon=True)
+        _infer_thread.start()
+
+    # (optional) start cv2 loop if you're using it
+    # if _cv2_thread is None or not _cv2_thread.is_alive():
+    #     _cv2_thread = threading.Thread(target=cv2_loop, daemon=True)
+    #     _cv2_thread.start()
+
 
 # ------------------------------
 # Entrypoint
@@ -1454,7 +1943,7 @@ if __name__ == "__main__":
     # Optioneel: zet NO_AUTO_OPEN=1 in je env om dit uit te zetten
     if os.getenv("NO_AUTO_OPEN") != "1":
         print(f"[INFO] Opening browser op: {origin_url}")
-        _open_browser_soon(origin_url, delay=1.5)
+        _open_browser_soon(origin_url, delay=5)
 
     uvicorn.run(
         app, host=host, port=port,

@@ -20,7 +20,7 @@
     // Stabilisatie-parameters (tracking smoothing / hysterese)
     const holdInp = document.getElementById("holdInp"); const holdVal = document.getElementById("holdVal");
     const hitsInp = document.getElementById("hitsInp"); const hitsVal = document.getElementById("hitsVal");
-    const emaInp  = document.getElementById("emaInp");  const emaVal  = document.getElementById("emaVal");
+    const emaInp = document.getElementById("emaInp"); const emaVal = document.getElementById("emaVal");
 
     const classesBox = document.getElementById("classesBox"); // container voor dynamisch gegenereerde class-checkboxen
     const saveBtn = document.getElementById("saveBtn");       // knop om conf/iou/imgsz/allowed_classes op te slaan
@@ -40,14 +40,26 @@
     const productsCount = document.getElementById('productsCount');
 
     const showMasksInp = document.getElementById("showMasksInp");
+    const showBoxesInp = document.getElementById("showBoxesInp");
+    const showContoursInp = document.getElementById("showContoursInp");
 
     showMasksInp?.addEventListener('change', () => {
-  POSTJSON('/api/config', { show_masks: !!showMasksInp.checked })
-    .catch(e => alert('Kon show_masks niet opslaan: ' + e.message));
-});
+        POSTJSON('/api/config', { show_masks: !!showMasksInp.checked })
+            .catch(e => alert('Kon show_masks niet opslaan: ' + e.message));
+    });
+
+    showBoxesInp?.addEventListener('change', () => {
+        POSTJSON('/api/config', { show_boxes: !!showBoxesInp.checked })
+            .catch(e => alert('Kon show_boxes niet opslaan: ' + e.message));
+    });
+
+    showContoursInp?.addEventListener('change', () => {
+        POSTJSON('/api/config', { contour_match_enabled: !!showContoursInp.checked })
+            .catch(e => alert('Kon contour instelling niet opslaan: ' + e.message));
+    });
 
 
-     // Wanneer de modal openklapt, bouw de QR naar /sender op dezelfde host/poort/protocol
+    // Wanneer de modal openklapt, bouw de QR naar /sender op dezelfde host/poort/protocol
     const qrModalEl = document.getElementById('qrModal');
 
     // ===== In-memory staat =====
@@ -57,6 +69,9 @@
     let collections = [];           // laatste geladen collections
     let products = [];              // laatste geladen producten (eventueel gefilterd op collection)
     let selectedCollectionId = null;
+
+    let lastMatchedProductIds = new Set();
+
 
     // ===== Kleine helpers =====
 
@@ -75,59 +90,59 @@
     };
 
     // Slider-labels netjes formatteren
-    bindRange(confInp,  confVal,  v => (+v).toFixed(2));
-    bindRange(iouInp,   iouVal,   v => (+v).toFixed(2));
+    bindRange(confInp, confVal, v => (+v).toFixed(2));
+    bindRange(iouInp, iouVal, v => (+v).toFixed(2));
     bindRange(imgszInp, imgszVal, v => `${v}`);
-    bindRange(holdInp,  holdVal,  v => `${v} ms`);
-    bindRange(hitsInp,  hitsVal,  v => `${v}`);
-    bindRange(emaInp,   emaVal,   v => (+v).toFixed(2));
+    bindRange(holdInp, holdVal, v => `${v} ms`);
+    bindRange(hitsInp, hitsVal, v => `${v}`);
+    bindRange(emaInp, emaVal, v => (+v).toFixed(2));
 
     if (!qrModalEl) return;
 
     const senderUrl = () => {
-      // Gebruik exact dezelfde origin als de viewer (juiste IP/poort/https):
-      const origin = window.location.origin;     // bv. http://192.168.1.50:8000
-      return origin + "/sender";
+        // Gebruik exact dezelfde origin als de viewer (juiste IP/poort/https):
+        const origin = window.location.origin;     // bv. http://192.168.1.50:8000
+        return origin + "/sender";
     };
 
     const qrContainer = document.getElementById('qrTarget');
-    const qrLinkEl    = document.getElementById('qrLink');
-    const copyBtn     = document.getElementById('copyLinkBtn');
+    const qrLinkEl = document.getElementById('qrLink');
+    const copyBtn = document.getElementById('copyLinkBtn');
 
     let qr;
 
- qrModalEl.addEventListener('show.bs.modal', function () {
-  const url = senderUrl();
-  qrLinkEl.textContent = url;
-  qrLinkEl.href = url;
+    qrModalEl.addEventListener('show.bs.modal', function () {
+        const url = senderUrl();
+        qrLinkEl.textContent = url;
+        qrLinkEl.href = url;
 
-  qrContainer.innerHTML = "";
+        qrContainer.innerHTML = "";
 
-  if (window.QRCode) {
-    new QRCode(qrContainer, {
-      text: url,
-      width: 220,
-      height: 220,
-      correctLevel: QRCode.CorrectLevel.M
+        if (window.QRCode) {
+            new QRCode(qrContainer, {
+                text: url,
+                width: 220,
+                height: 220,
+                correctLevel: QRCode.CorrectLevel.M
+            });
+        } else {
+            // Fallback: duidelijke melding
+            const warn = document.createElement('div');
+            warn.className = 'text-danger small';
+            warn.textContent = 'QR-module niet geladen; klik op de link hierboven.';
+            qrContainer.appendChild(warn);
+        }
     });
-  } else {
-    // Fallback: duidelijke melding
-    const warn = document.createElement('div');
-    warn.className = 'text-danger small';
-    warn.textContent = 'QR-module niet geladen; klik op de link hierboven.';
-    qrContainer.appendChild(warn);
-  }
-});
 
 
-    copyBtn?.addEventListener('click', async ()=>{
-      try {
-        await navigator.clipboard.writeText(senderUrl());
-        copyBtn.textContent = "Gekopieerd!";
-        setTimeout(()=> copyBtn.textContent = "Kopieer link", 1200);
-      } catch(e){
-        alert("Kopiëren mislukt, kopieer handmatig: " + senderUrl());
-      }
+    copyBtn?.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(senderUrl());
+            copyBtn.textContent = "Gekopieerd!";
+            setTimeout(() => copyBtn.textContent = "Kopieer link", 1200);
+        } catch (e) {
+            alert("Kopiëren mislukt, kopieer handmatig: " + senderUrl());
+        }
     });
 
     /**
@@ -161,6 +176,160 @@
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
     }[m]));
 
+    // --- normalisatie & enkelvoud/meervoud varianten ---
+    const norm = s => String(s || '').trim().toLowerCase();
+
+    function nameVariants(name) {
+        const n = norm(name);
+        const vars = new Set([n]);
+
+        // simpel meervoud/enkelvoud
+        if (n.endsWith('ies')) vars.add(n.slice(0, -3) + 'y');     // batteries -> battery
+        if (n.endsWith('y')) vars.add(n.slice(0, -1) + 'ies');   // battery -> batteries
+        if (n.endsWith('es')) vars.add(n.slice(0, -2));           // boxes -> box
+        if (n.endsWith('s')) vars.add(n.slice(0, -1));           // earbuds -> earbud
+        else vars.add(n + 's');                  // earbud -> earbuds
+
+        return Array.from(vars);
+    }
+
+    // haal count op uit presentMap met tolerant matching
+    function getActualCountFor(name, pmap) {
+        const keys = Object.keys(pmap || {});
+        const wanted = nameVariants(name);
+        // 1) exacte match op varianten
+        for (const v of wanted) {
+            if (pmap.hasOwnProperty(v)) return Number(pmap[v]) || 0;
+        }
+        // 2) fallback: vind een key met zelfde variant (robuster bij kleine variaties)
+        for (const k of keys) {
+            const kv = nameVariants(k);
+            if (kv.some(v => wanted.includes(v))) return Number(pmap[k]) || 0;
+        }
+        return 0;
+    }
+
+    // onthoud wat we al verstuurd hebben (debounce per product)
+    const lastRejectKeyByPid = new Map();
+
+    function detailedMismatches(prod, pmap) {
+        if (!prod || !prod.properties) return [];
+        const out = [];
+        for (const [name, expectedRaw] of Object.entries(prod.properties)) {
+            const expected = Number(expectedRaw);
+            if (!Number.isFinite(expected) || expected === 0) continue;
+            const actual = getActualCountFor(name, pmap);
+            if (actual !== expected) out.push({ name, expected, actual });
+        }
+        return out;
+    }
+
+    async function sendRejectIfNew(pid, prod, pmap) {
+        const mism = detailedMismatches(prod, pmap);
+        if (!mism.length) return;               // niets fout → niets sturen
+        const key = JSON.stringify({ mism, pmap }); // eenvoudige dedupe
+        if (lastRejectKeyByPid.get(pid) === key) return;
+        lastRejectKeyByPid.set(pid, key);
+
+        try {
+            await POSTJSON('/api/rejects', {
+                product_id: String(pid),
+                product_name: String(prod?.name || pid),
+                mismatches: mism,
+                expected_properties: prod?.properties || {},
+                present_counts: pmap,                // raw snapshot van wat er gezien werd
+            });
+        } catch (e) {
+            console.warn('Kon reject niet opslaan:', e);
+        }
+    }
+
+
+
+    // ====== helpers voor product-mismatch alerts ======
+    function productById(pid) {
+        return (products || []).find(p => String(p.id) === String(pid)) || null;
+    }
+
+    /**
+     * Genereer foutmeldingen voor één product o.b.v. presentMap en product.properties.
+     * - properties met waarde 0: overslaan (geen eis)
+     * - bij != expected: foutregel toevoegen
+     * Resultaat: [] of array met strings (NL melding)
+     */
+    function computePropertyMismatches(prod, pmap) {
+        if (!prod || !prod.properties || typeof prod.properties !== 'object') return [];
+        const msgs = [];
+        for (const [name, expectedRaw] of Object.entries(prod.properties)) {
+            const expected = Number(expectedRaw);
+            if (!Number.isFinite(expected) || expected === 0) continue; // 0 = geen eis
+
+            const actual = getActualCountFor(name, pmap);  // << tolerant tellen
+            if (actual !== expected) {
+                msgs.push(`Productiefout: ziet ${actual} ${name}, moet ${expected} ${name} zien.`);
+            }
+        }
+        return msgs;
+    }
+
+
+    /**
+     * Plaats (of verwijder) een alert-rij direct onder de product rij in de tabel.
+     */
+    function renderProductAlertRow(pid, messages) {
+        const tr = document.querySelector(`#productsBody tr.product-row[data-pid="${CSS.escape(String(pid))}"]`);
+        if (!tr) return;
+
+        // oude rij opruimen
+        const next = tr.nextElementSibling;
+        if (next && next.matches('.product-alert-row') && next.dataset.pid === String(pid)) next.remove();
+
+        if (!messages || !messages.length) return;
+
+        // nieuwe alert tonen
+        const alertTr = document.createElement('tr');
+        alertTr.className = 'product-alert-row';
+        alertTr.dataset.pid = String(pid);
+        alertTr.innerHTML = `
+    <td colspan="2" class="product-alert">
+      <div class="alert alert-danger" role="alert">
+        ${messages.map(m => `<div>${m}</div>`).join('')}
+        <div class="mt-2">
+          <a class="btn btn-sm btn-outline-light" href="/rejects-ui" target="_blank" rel="noopener">Bekijk afgekeurde producten</a>
+        </div>
+      </div>
+    </td>`;
+        tr.insertAdjacentElement('afterend', alertTr);
+
+        // --> stuur reject (met debounce)
+        const prod = productById(pid);
+        sendRejectIfNew(pid, prod, presentMap);
+    }
+
+
+    /**
+     * Voor alle gematchte producten: (her)bereken en toon de alerts.
+     * Voor niet-gematchte producten: alerts weghalen.
+     */
+    function updateAllProductAlerts(matchedIds) {
+        const idSet = new Set((matchedIds || []).map(String));
+
+        // loop alle product-rijen
+        document.querySelectorAll('#productsBody tr.product-row[data-pid]').forEach(tr => {
+            const pid = String(tr.dataset.pid);
+            if (!idSet.has(pid)) {
+                // niet (meer) gematcht → alert weg
+                const next = tr.nextElementSibling;
+                if (next && next.matches('.product-alert-row') && next.dataset.pid === pid) next.remove();
+                return;
+            }
+            const prod = productById(pid);
+            const mismatches = computePropertyMismatches(prod, presentMap);
+            renderProductAlertRow(pid, mismatches);
+        });
+    }
+
+
     // ===== WebSocket verbinding met backend =====
     // Protocol kiezen (wss op https, ws anders)
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -178,14 +347,19 @@
             currentConfig = msg.config || {};
 
             // Vul sliders/inputs met de actuele waarden
-            if (confInp  && currentConfig.conf       != null) confInp.value  = currentConfig.conf;
-            if (iouInp   && currentConfig.iou        != null) iouInp.value   = currentConfig.iou;
-            if (imgszInp && currentConfig.imgsz      != null) imgszInp.value = currentConfig.imgsz;
-            if (holdInp  && currentConfig.hold_ms    != null) holdInp.value  = currentConfig.hold_ms;
-            if (hitsInp  && currentConfig.min_hits   != null) hitsInp.value  = currentConfig.min_hits;
-            if (emaInp   && currentConfig.ema_alpha  != null) emaInp.value   = currentConfig.ema_alpha;
-            if (showMasksInp && typeof msg?.config?.show_masks === "boolean") {showMasksInp.checked = !!msg.config.show_masks;}
-
+            if (confInp && currentConfig.conf != null) confInp.value = currentConfig.conf;
+            if (iouInp && currentConfig.iou != null) iouInp.value = currentConfig.iou;
+            if (imgszInp && currentConfig.imgsz != null) imgszInp.value = currentConfig.imgsz;
+            if (holdInp && currentConfig.hold_ms != null) holdInp.value = currentConfig.hold_ms;
+            if (hitsInp && currentConfig.min_hits != null) hitsInp.value = currentConfig.min_hits;
+            if (emaInp && currentConfig.ema_alpha != null) emaInp.value = currentConfig.ema_alpha;
+            if (showMasksInp && typeof msg?.config?.show_masks === "boolean") { showMasksInp.checked = !!msg.config.show_masks; }
+            if (showBoxesInp && typeof msg?.config?.show_boxes === "boolean") {
+                showBoxesInp.checked = !!msg.config.show_boxes;
+            }
+            if (showContoursInp && typeof msg?.config?.contour_match_enabled === "boolean") {
+                showContoursInp.checked = !!msg.config.contour_match_enabled;
+            }
 
             // (Re)genereer class-checkboxen op basis van 'classes' van het primary model
             if (classesBox && Array.isArray(msg.classes)) {
@@ -211,9 +385,50 @@
         if (msg.type === "detections") {
             renderDetections(msg.items || []);
             renderPresent(msg.present || []);
+            highlightProducts(msg.matched_product_ids ?? []);
+            updateAllProductAlerts(msg.matched_product_ids ?? []);
+
+
+            if (Array.isArray(msg.contours) && msg.contours.length) {
+                // e.g., show a small list under "In beeld"
+                const box = document.getElementById("stickyBox");
+                const div = document.createElement('div');
+                div.className = 'mt-2';
+                div.innerHTML = '<div class="small text-muted">Contour matches:</div>' +
+                    msg.contours.map(h => `<span class="badge text-bg-success me-1">${h.type_key} ${h.iop}</span>`).join(' ');
+                box.appendChild(div);
+            }
             return;
         }
     };
+
+    function highlightProducts(ids) {
+        // Normaliseer wat er binnenkomt
+        let arr = [];
+        if (Array.isArray(ids)) arr = ids;
+        else if (ids instanceof Set) arr = Array.from(ids);
+        else if (typeof ids === 'string' || typeof ids === 'number') arr = [String(ids)];
+        else if (ids && typeof ids === 'object') {
+            if (Array.isArray(ids.matched_product_ids)) arr = ids.matched_product_ids;
+            else if (Array.isArray(ids.ids)) arr = ids.ids;
+        }
+
+        arr = arr.map(String);
+        lastMatchedProductIds = new Set(arr);
+
+        // pas kleur toe
+        document.querySelectorAll('#productsBody tr.product-row[data-pid]').forEach(tr => {
+            const pid = String(tr.dataset.pid);
+            if (lastMatchedProductIds.has(pid)) {
+                tr.classList.add('product-hit');
+            } else {
+                tr.classList.remove('product-hit');
+            }
+        });
+    }
+
+
+
 
     // ===== Render-functies =====
 
@@ -243,7 +458,8 @@
      */
     function renderPresent(arr) {
         presentMap = {};
-        arr.forEach(s => presentMap[s.label] = s.count);
+        // sla genormaliseerd op
+        arr.forEach(s => presentMap[norm(s.label)] = Number(s.count) || 0);
 
         if (stickyBox) {
             if (!arr.length) {
@@ -260,6 +476,7 @@
         }
     }
 
+
     // ===== Opslaan van detector-config (conf/iou/imgsz/allowed_classes) =====
     async function saveConfig() {
         // allowed_classes: als ALLE checkboxes aan staan -> stuur lege lijst (betekent "geen filter")
@@ -274,8 +491,8 @@
 
         // Backend verwacht alleen velden die je wilt aanpassen
         await POSTJSON("/api/config", {
-            conf:  confInp  ? parseFloat(confInp.value)  : undefined,
-            iou:   iouInp   ? parseFloat(iouInp.value)   : undefined,
+            conf: confInp ? parseFloat(confInp.value) : undefined,
+            iou: iouInp ? parseFloat(iouInp.value) : undefined,
             imgsz: imgszInp ? parseInt(imgszInp.value, 10) : undefined,
             allowed_classes,
             show_masks: showMasksInp ? !!showMasksInp.checked : undefined
@@ -285,9 +502,9 @@
     // ===== Opslaan van stabilisatie-parameters (hold_ms/min_hits/ema_alpha) =====
     async function saveStab() {
         await POSTJSON("/api/config", {
-            hold_ms:  holdInp ? parseInt(holdInp.value, 10)   : undefined,
-            min_hits: hitsInp ? parseInt(hitsInp.value, 10)   : undefined,
-            ema_alpha: emaInp ? parseFloat(emaInp.value)      : undefined,
+            hold_ms: holdInp ? parseInt(holdInp.value, 10) : undefined,
+            min_hits: hitsInp ? parseInt(hitsInp.value, 10) : undefined,
+            ema_alpha: emaInp ? parseFloat(emaInp.value) : undefined,
         });
     }
 
@@ -357,7 +574,6 @@
             productsBody.innerHTML = `<tr><td colspan="2" class="text-muted">Geen producten</td></tr>`;
         } else {
             for (const p of products) {
-                // Properties als badges: gesorteerd op sleutelnaam voor voorspelbare volgorde
                 const props = p?.properties && typeof p.properties === 'object'
                     ? Object.entries(p.properties)
                         .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
@@ -366,16 +582,21 @@
                     : '';
 
                 const tr = document.createElement('tr');
+                tr.classList.add('product-row', 'align-middle');
+                tr.dataset.pid = String(p.id);          // << needed for highlight
                 tr.innerHTML = `
-                    <td>${esc(p.name || '')}</td>
-                    <td>${props || '—'}</td>
-                `;
+        <td>${esc(p.name || '')}</td>
+        <td>${props || '—'}</td>
+      `;
                 productsBody.appendChild(tr);
             }
         }
 
-        // Kleine teller boven de tabel
         if (productsCount) productsCount.textContent = String(products?.length || 0);
+
+        // keep highlights after re-render
+        highlightProducts(Array.from(lastMatchedProductIds));
+        updateAllProductAlerts(Array.from(lastMatchedProductIds));
     }
 
     // ===== Model-lijsten (basismodellen + getrainde) & acties =====
@@ -432,11 +653,11 @@
             }
 
             // --- Getrainde modellen (checkbox) + badges 'primary' of 'actief' ---
-            const trained   = await GET('/api/models');        // lijst van {name, path, size, mtime, source}
+            const trained = await GET('/api/models');        // lijst van {name, path, size, mtime, source}
             const activeRes = await getActiveModelsSafe();      // { active: [paths/keys...] } (eerste = primary)
             const activeArr = Array.isArray(activeRes?.active) ? activeRes.active.map(String) : [];
             const activeSet = new Set(activeArr);
-            const primary   = activeArr[0] || null;
+            const primary = activeArr[0] || null;
 
             if (trainedModelsBox) {
                 trainedModelsBox.innerHTML = '';
@@ -447,7 +668,7 @@
                         const id = `trained_${idx}`;
                         const sizeKB = Math.round((m.size || 0) / 1024);
                         const pathStr = String(m.path);
-                        const isActive  = activeSet.has(pathStr);
+                        const isActive = activeSet.has(pathStr);
                         const isPrimary = primary === pathStr;
 
                         const div = document.createElement('div');
@@ -460,7 +681,7 @@
                             ${esc(m.name)}
                             <small class="text-muted">(${sizeKB} KB)</small>
                             ${isPrimary ? '<span class="badge text-bg-success ms-1">primary</span>'
-                                        : (isActive ? '<span class="badge text-bg-info ms-1">actief</span>' : '')}
+                                : (isActive ? '<span class="badge text-bg-info ms-1">actief</span>' : '')}
                           </label>
                         `;
                         trainedModelsBox.appendChild(div);
@@ -470,7 +691,7 @@
         } catch (e) {
             // Toon nette foutmeldingen in de UI-secties
             console.error('Kon modellen niet laden:', e);
-            if (baseModelsBox)    baseModelsBox.innerHTML    = `<div class="text-danger small">Fout bij laden basismodellen</div>`;
+            if (baseModelsBox) baseModelsBox.innerHTML = `<div class="text-danger small">Fout bij laden basismodellen</div>`;
             if (trainedModelsBox) trainedModelsBox.innerHTML = `<div class="text-danger small">Fout bij laden getrainde modellen</div>`;
         }
     }
@@ -520,7 +741,7 @@
     });
 
     // ===== Event bindings =====
-    if (saveBtn)     saveBtn.addEventListener("click", saveConfig);
+    if (saveBtn) saveBtn.addEventListener("click", saveConfig);
     if (saveStabBtn) saveStabBtn.addEventListener("click", saveStab);
 
     // Snelkeuzes voor class-filters
@@ -539,5 +760,6 @@
         await loadModelLists();
         await loadCollections();
         await loadProducts(null); // geen filter -> toon alle producten
+        highlightProducts(lastMatchedProductIds);
     })();
 })();
