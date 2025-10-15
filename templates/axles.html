@@ -1,161 +1,163 @@
- <html lang="en">
-        <head>
-            <meta charset="utf-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1" />
-            <title>Axle Types & Subtypes (Mock MES)</title>
+<html lang="en">
 
-            <!-- Bootstrap 5 CSS voor layout en styling -->
-            <link
-                href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-                rel="stylesheet"
-                integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
-                crossorigin="anonymous"
-            />
-            <style>
-    /* Kleine badge met monospaced lettertype voor het type-code label */
-                .code-badge {
-                    display: inline-block;
-                background: #f2f2f2;
-                border-radius: .4rem;
-                padding: .1rem .5rem;
-                font-family: ui-monospace, monospace;
-    }
-                /* Sticky table head zodat de kolomnamen zichtbaar blijven bij scrollen */
-                thead th.sticky {
-                    position: sticky;
-                top: 0;
-                background: #fafafa;
-                z-index: 1;
-    }
-            </style>
-        </head>
-        <body class="bg-light">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axle Types & Subtypes (Mock MES)</title>
 
-            <!-- ========================
+    <!-- Bootstrap 5 CSS voor layout en styling -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous" />
+    <style>
+        /* Kleine badge met monospaced lettertype voor het type-code label */
+        .code-badge {
+            display: inline-block;
+            background: #f2f2f2;
+            border-radius: .4rem;
+            padding: .1rem .5rem;
+            font-family: ui-monospace, monospace;
+        }
+
+        /* Sticky table head zodat de kolomnamen zichtbaar blijven bij scrollen */
+        thead th.sticky {
+            position: sticky;
+            top: 0;
+            background: #fafafa;
+            z-index: 1;
+        }
+    </style>
+</head>
+
+<body class="bg-light">
+
+    <!-- ========================
             Navbar bovenaan
             - Merknaam links
             - Links naar andere pagina's
        ======================== -->
-      <nav class="navbar navbar-expand-lg bg-white border-bottom sticky-top">
-                <div class="container">
-                    <a class="navbar-brand fw-semibold" href="/">Daf-AI</a>
-                    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
-                        <span class="navbar-toggler-icon"></span>
-                    </button>
-                    <div id="nav" class="collapse navbar-collapse">
-                        <ul class="navbar-nav ms-auto">
-                            <li class="nav-item"><a href="/" class="nav-link">Live Viewer</a></li>
-                            <li class="nav-item"><a href="/products-ui" class="nav-link">products</a></li>
-                            <li class="nav-item"><a href="/trainer" class="nav-link">Trainer</a></li>
-                        </ul>
-                    </div>
-                </div>
-            </nav>
+    <nav class="navbar navbar-expand-lg bg-white border-bottom sticky-top">
+        <div class="container">
+            <a class="navbar-brand fw-semibold" href="/">Daf-AI</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div id="nav" class="collapse navbar-collapse">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a href="/" class="nav-link">Live Viewer</a></li>
+                    <li class="nav-item"><a href="/products-ui" class="nav-link">products</a></li>
+                    <li class="nav-item"><a href="/trainer" class="nav-link">Trainer</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
 
 
-            <!-- ========================
+    <!-- ========================
             Hoofdinhoud
             - Linkerkolom: Typekeuze + orders
             - Rechterkolom: Subtypebeheer
        ======================== -->
-            <main class="container my-4">
-                <div class="row g-4">
+    <main class="container my-4">
+        <div class="row g-4">
 
-                    <!-- Linker kolom: Axle types + Orders -->
-                    <section class="col-12 col-lg-4">
-                        <div class="card shadow-sm">
-                            <div class="card-body">
-                                <h2 class="h4 mb-3">Axle Types</h2>
+            <!-- Linker kolom: Axle types + Orders -->
+            <section class="col-12 col-lg-4">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h2 class="h4 mb-3">Axle Types</h2>
 
-                                <!-- Dropdown om type te selecteren -->
-                                <div class="mb-3">
-                                    <label for="typeSel" class="form-label fw-semibold">Type</label>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <!-- Select gevuld door axles.js -->
-                                        <select id="typeSel" class="form-select w-auto"></select>
-                                        <!-- propInfo is verwijderd; JS kan zonder werken -->
-                                    </div>
-                                </div>
-
-                                <!-- Tabel met orders (mock MES) -->
-                                <div class="table-responsive mt-2">
-                                    <table id="ordersTbl" class="table table-sm table-striped align-middle mb-0">
-                                        <!-- Head en body worden dynamisch gevuld -->
-                                    </table>
-                                </div>
+                        <!-- Dropdown om type te selecteren -->
+                        <div class="mb-3">
+                            <label for="typeSel" class="form-label fw-semibold">Type</label>
+                            <div class="d-flex align-items-center gap-2">
+                                <!-- Select gevuld door axles.js -->
+                                <select id="typeSel" class="form-select w-auto"></select>
+                                <!-- propInfo is verwijderd; JS kan zonder werken -->
                             </div>
                         </div>
-                    </section>
 
-                    <!-- Rechter kolom: Subtypes voor geselecteerd type -->
-                    <section class="col-12 col-lg-12">
-                        <div class="card shadow-sm">
-                            <div class="card-body">
-                                <h2 class="h4 mb-3">
-                                    Subtypes for <span id="typeCode" class="code-badge">—</span>
-                                </h2>
-
-                                <!-- Formulier voor maken/bewerken van subtypes -->
-                                <div id="formBox" class="border rounded p-3 bg-light-subtle mb-3">
-                                    <div class="row g-3 align-items-end">
-                                        <!-- Subtype naam veld -->
-                                        <div class="col-auto">
-                                            <label class="form-label fw-semibold">Subtype name</label>
-                                            <input id="subName" class="form-control form-control-sm" placeholder="e.g. 358" />
-                                            <input type="hidden" id="subId" /> <!-- wordt gevuld in edit-mode -->
-                                        </div>
-
-                                        <!-- Property editor: verschijnt alleen in EDIT-modus -->
-                                        <div id="propEditor" class="col-12 d-none">
-                                            <!-- Dynamische lijst met property invoervelden -->
-                                            <div id="propInputs" class="d-flex flex-column gap-2"></div>
-                                            <!-- Knop om nieuwe property-rij toe te voegen -->
-                                            <div class="mt-2">
-                                                <button type="button" id="addPropBtn" class="btn btn-outline-secondary btn-sm">
-                                                    Add property
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        <!-- Actieknoppen (tonen/hiden afhankelijk van modus) -->
-                                        <div class="col-12">
-                                            <button id="createBtn" class="btn btn-primary btn-sm">Create</button>
-                                            <button id="updateBtn" class="btn btn-success btn-sm d-none">Update</button>
-                                            <button id="cancelEditBtn" class="btn btn-outline-secondary btn-sm d-none">Cancel</button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Tabel met subtypes voor geselecteerd type -->
-                                <div class="table-responsive">
-                                    <table id="subsTbl" class="table table-sm table-striped align-middle">
-                                        <thead id="subsHead" class="table-light"></thead>
-                                        <tbody id="subsBody">
-                                            <tr><td class="text-muted">No data</td></tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                            </div>
+                        <!-- Tabel met orders (mock MES) -->
+                        <div class="table-responsive mt-2">
+                            <table id="ordersTbl" class="table table-sm table-striped align-middle mb-0">
+                                <!-- Head en body worden dynamisch gevuld -->
+                            </table>
                         </div>
-                    </section>
+                    </div>
                 </div>
-            </main>
+            </section>
 
-            <!-- Bootstrap JS bundel (met Popper) -->
-            <script
-                src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
-                integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
-                crossorigin="anonymous"></script>
+            <!-- Rechter kolom: Subtypes voor geselecteerd type -->
+            <section class="col-12 col-lg-12">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h2 class="h4 mb-3">
+                            Subtypes for <span id="typeCode" class="code-badge">—</span>
+                        </h2>
 
-            <!-- Markeer de huidige pagina actief in de navbar -->
-            <script>
-    document.querySelectorAll('.nav-link').forEach(a => {
-      if (a.getAttribute('href') === window.location.pathname) a.classList.add('active');
-    });
-            </script>
+                        <!-- Formulier voor maken/bewerken van subtypes -->
+                        <div id="formBox" class="border rounded p-3 bg-light-subtle mb-3">
+                            <div class="row g-3 align-items-end">
+                                <!-- Subtype naam veld -->
+                                <div class="col-auto">
+                                    <label class="form-label fw-semibold">Subtype name</label>
+                                    <input id="subName" class="form-control form-control-sm" placeholder="e.g. 358" />
+                                    <input type="hidden" id="subId" /> <!-- wordt gevuld in edit-mode -->
+                                </div>
 
-            <!-- Paginalogica: laadt types, subtypes en orders -->
-            <script src="/static/axles.js"></script>
-        </body>
-    </html>
+                                <!-- Property editor: verschijnt alleen in EDIT-modus -->
+                                <div id="propEditor" class="col-12 d-none">
+                                    <!-- Dynamische lijst met property invoervelden -->
+                                    <div id="propInputs" class="d-flex flex-column gap-2"></div>
+                                    <!-- Knop om nieuwe property-rij toe te voegen -->
+                                    <div class="mt-2">
+                                        <button type="button" id="addPropBtn" class="btn btn-outline-secondary btn-sm">
+                                            Add property
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Actieknoppen (tonen/hiden afhankelijk van modus) -->
+                                <div class="col-12">
+                                    <button id="createBtn" class="btn btn-primary btn-sm">Create</button>
+                                    <button id="updateBtn" class="btn btn-success btn-sm d-none">Update</button>
+                                    <button id="cancelEditBtn"
+                                        class="btn btn-outline-secondary btn-sm d-none">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tabel met subtypes voor geselecteerd type -->
+                        <div class="table-responsive">
+                            <table id="subsTbl" class="table table-sm table-striped align-middle">
+                                <thead id="subsHead" class="table-light"></thead>
+                                <tbody id="subsBody">
+                                    <tr>
+                                        <td class="text-muted">No data</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Bootstrap JS bundel (met Popper) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
+
+    <!-- Markeer de huidige pagina actief in de navbar -->
+    <script>
+        document.querySelectorAll('.nav-link').forEach(a => {
+            if (a.getAttribute('href') === window.location.pathname) a.classList.add('active');
+        });
+    </script>
+
+    <!-- Paginalogica: laadt types, subtypes en orders -->
+    <script src="/static/axles.js"></script>
+</body>
+
+</html>

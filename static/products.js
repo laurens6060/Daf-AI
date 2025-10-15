@@ -194,9 +194,9 @@ function selectCollection(cid) {
 // ========================================================================
 
 // Property toevoegen/leegmaken/nieuw product beginnen/refresh
-els.addProp.onclick   = () => els.propList.appendChild(propRow());
-els.resetBtn.onclick  = () => setEditor();
-els.newProduct.onclick= () => setEditor();
+els.addProp.onclick = () => els.propList.appendChild(propRow());
+els.resetBtn.onclick = () => setEditor();
+els.newProduct.onclick = () => setEditor();
 els.reloadBtn.onclick = () => loadProducts();
 
 /**
@@ -310,10 +310,10 @@ function renderTable() {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             ${cols.map(c => {
-                if (c === 'name') return `<td><strong>${it.name || ''}</strong></td>`;
-                const v = it.properties?.[c];
-                return `<td>${v === undefined ? '' : String(v)}</td>`;
-            }).join('')}
+            if (c === 'name') return `<td><strong>${it.name || ''}</strong></td>`;
+            const v = it.properties?.[c];
+            return `<td>${v === undefined ? '' : String(v)}</td>`;
+        }).join('')}
             <td class="text-nowrap">
                 <button class="btn btn-sm btn-outline-primary me-1 edit">Bewerk</button>
                 <button class="btn btn-sm btn-outline-danger del">Verwijder</button>

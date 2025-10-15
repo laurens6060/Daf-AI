@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="nl">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Contours • Daf-AI</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .canvas-wrap {
+      position: relative;
+      display: inline-block;
+      max-width: 100%;
+    }
+
+    .canvas-wrap img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .canvas-wrap canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .listbox {
+      max-height: 260px;
+      overflow: auto;
+    }
+
+    .navbar-brand {
+      text-decoration: underline;
+      text-decoration-color: red;
+      text-decoration-thickness: 3px
+    }
+  </style>
+</head>
+
+<body class="bg-light">
+  <nav class="navbar navbar-expand-lg bg-white border-bottom sticky-top">
+    <div class="container">
+      <a class="navbar-brand text-primary fw-semibold" href="/">Daf-Vision</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div id="nav" class="collapse navbar-collapse">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item"><a href="/" class="nav-link">Live Viewer</a></li>
+          <li class="nav-item"><a href="/products-ui" class="nav-link">products</a></li>
+          <li class="nav-item"><a href="/trainer" class="nav-link">Trainer</a></li>
+          <li class="nav-item"><a href="/contours" class="nav-link">Contours</a></li>
+          <li class="nav-item"><a href="/rejects" class="nav-link">Productiefout</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+    <div class="row g-4">
+      <section class="col-12 col-lg-7">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h2 class="h5">Teken contour op referentiefoto</h2>
+            <div class="d-flex gap-2 mb-3 align-items-end">
+              <div class="flex-grow-1">
+                <label class="form-label fw-semibold">Naam (zichtbaar)</label>
+                <input id="name" class="form-control" placeholder="Bv. Type 1">
+              </div>
+              <div class="flex-grow-1">
+                <label class="form-label fw-semibold">Type key (machine)</label>
+                <input id="typeKey" class="form-control" placeholder="bv. type1">
+              </div>
+              <div>
+                <label class="form-label fw-semibold d-block">Foto</label>
+                <button id="pick" class="btn btn-outline-primary">Kies foto</button>
+                <input id="file" type="file" accept="image/*" hidden>
+              </div>
+            </div>
+
+            <div id="work" class="canvas-wrap d-none">
+              <img id="img" alt="">
+              <canvas id="cvs"></canvas>
+            </div>
+
+            <div class="mt-3 d-flex gap-2">
+              <button id="undo" class="btn btn-outline-secondary btn-sm" disabled>Undo punt</button>
+              <button id="clearPoly" class="btn btn-outline-danger btn-sm" disabled>Verwijder polygoon</button>
+              <button id="save" class="btn btn-success btn-sm" disabled>Contour opslaan</button>
+            </div>
+            <div class="form-text mt-2">Klik punten om een polygoon rond de <strong>object</strong> te tekenen.
+              Dubbelklik of klik op “Contours opslaan”.</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="col-12 col-lg-5">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="flex-grow-1 mb-3">
+              <label class="form-label fw-semibold">Product</label>
+              <select id="product" class="form-select">
+                <option value="">(geen)</option>
+              </select>
+            </div>
+            <h2 class="h6">Bestaande contouren</h2>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="input-group input-group-sm w-50">
+                <span class="input-group-text">Zoek</span>
+                <input id="search" class="form-control" placeholder="naam of type key…">
+              </div>
+              <div>
+                <span id="listCount" class="text-muted me-2"></span>
+                <button id="refresh" class="btn btn-sm btn-outline-secondary">Vernieuwen</button>
+              </div>
+            </div>
+
+            <div id="list" class="listbox"></div>
+            <div class="mt-3">
+              <label class="form-label fw-semibold">Match-instellingen</label>
+              <div class="input-group input-group-sm mb-2">
+                <span class="input-group-text">Class</span>
+                <input id="cls" class="form-control" placeholder="">
+              </div>
+              <div class="input-group input-group-sm">
+                <span class="input-group-text">IoP ≥</span>
+                <input id="thr" type="number" step="0.01" class="form-control" placeholder="0.60">
+                <button id="applyCfg" class="btn btn-outline-primary">Opslaan</button>
+              </div>
+              <div class="form-text">IoP = overlap / mal-oppervlak. Bij statische camera werkt normaal 0.5–0.7 prima.
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/static/contours.js"></script>
+</body>
+
+</html>

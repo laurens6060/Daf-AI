@@ -1,358 +1,451 @@
- <html lang="nl">
-        <head>
-            <meta charset="UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1" />
-            <title>Trainer • YOLOv8 (server)</title>
+<html lang="nl">
 
-            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous" />
-            <style>
-                .image-card {border - radius:.75rem; overflow:hidden; border:1px solid #e9ecef; background:#fff; }
-                .canvas-wrap {position:relative; display:inline-block; width:100%; }
-                .canvas-wrap img {display:block; width:100%; height:auto; }
-                .canvas-wrap canvas {position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:auto; }
-                .logbox {font:12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-              white-space:pre-line; max-height:260px; overflow:auto; background:#0f1620; color:#e8eef5; border-radius:.5rem; }
-                .small-muted {font - size:.9rem; color:#6c757d; }
-                 .navbar-brand {text-decoration: underline; text-decoration-color: red; text-decoration-thickness: 3px}
-            </style>
-        </head>
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trainer • YOLOv8 (server)</title>
 
-        <body class="bg-light">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        crossorigin="anonymous" />
+    <style>
+        .image-card {
+            border-radius: .75rem;
+            overflow: hidden;
+            border: 1px solid #e9ecef;
+            background: #fff;
+        }
+
+        .canvas-wrap {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .canvas-wrap img {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        .canvas-wrap canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: auto;
+        }
+
+        .logbox {
+            font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            white-space: pre-line;
+            max-height: 260px;
+            overflow: auto;
+            background: #0f1620;
+            color: #e8eef5;
+            border-radius: .5rem;
+        }
+
+        .small-muted {
+            font-size: .9rem;
+            color: #6c757d;
+        }
+
+        .navbar-brand {
+            text-decoration: underline;
+            text-decoration-color: red;
+            text-decoration-thickness: 3px
+        }
+    </style>
+</head>
+
+<body class="bg-light">
     <nav class="navbar navbar-expand-lg bg-white border-bottom sticky-top">
-                <div class="container">
-                    <a class="navbar-brand fw-semibold text-primary" href="/">Daf-AI</a>
-                    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
-                        <span class="navbar-toggler-icon"></span>
-                    </button>
-                    <div id="nav" class="collapse navbar-collapse">
-                        <ul class="navbar-nav ms-auto">
-                            <li class="nav-item"><a href="/" class="nav-link">Live Viewer</a></li>
-                            <li class="nav-item"><a href="/products-ui" class="nav-link">products</a></li>
-                            <li class="nav-item"><a href="/trainer" class="nav-link">Trainer</a></li>
-                        </ul>
-                    </div>
-                </div>
-            </nav>
+        <div class="container">
+            <a class="navbar-brand text-primary fw-semibold" href="/">Daf-Vision</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div id="nav" class="collapse navbar-collapse">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a href="/" class="nav-link">Live Viewer</a></li>
+                    <li class="nav-item"><a href="/products-ui" class="nav-link">products</a></li>
+                    <li class="nav-item"><a href="/trainer" class="nav-link">Trainer</a></li>
+                    <li class="nav-item"><a href="/contours" class="nav-link">Contours</a></li>
+                    <li class="nav-item"><a href="/rejects" class="nav-link">Productiefout</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
 
 
-            <main class="container-fluid my-4">
-                <div class="row g-4">
-                    <!-- Sidebar -->
-                    <aside class="col-12 col-xl-3 order-1">
-                        <div class="position-sticky" style="top:1rem;">
-                            <div class="card shadow-sm">
-                                <div class="card-body">
-                                    <h1 class="h4 mb-2 d-flex align-items-center justify-content-between">
-                                        <span>Objectdetector trainen</span>
-                                        <button id="helpBtn" type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#helpModal">
-                                            Help
-                                        </button>
-                                    </h1>
-                                    <p class="small text-muted mb-3">Server-training met YOLOv8</p>
+    <main class="container-fluid my-4">
+        <div class="row g-4">
+            <!-- Sidebar -->
+            <aside class="col-12 col-xl-3 order-1">
+                <div class="position-sticky" style="top:1rem;">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h1 class="h4 mb-2 d-flex align-items-center justify-content-between">
+                                <span>Objectdetector trainen</span>
+                                <button id="helpBtn" type="button" class="btn btn-outline-secondary btn-sm"
+                                    data-bs-toggle="modal" data-bs-target="#helpModal">
+                                    Help
+                                </button>
+                            </h1>
+                            <p class="small text-muted mb-3">Server-training met YOLOv8</p>
 
-                                    <!-- In jouw Trainer sidebar/card body: voeg dit blok toe/bewerk -->
-                                    <div class="mb-3">
-                                        <label class="form-label fw-semibold" for="className">Klassenaam</label>
-                                        <input id="className" class="form-control form-control-sm" placeholder="bv. bout" value="" />
-                                        <div class="form-text">Naam van de (enige) klasse waarop je traint.</div>
-                                    </div>
+                            <!-- In jouw Trainer sidebar/card body: voeg dit blok toe/bewerk -->
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold" for="className">Klassenaam</label>
+                                <input id="className" class="form-control form-control-sm" placeholder="bv. bout"
+                                    value="" />
+                                <div class="form-text">Naam van de (enige) klasse waarop je traint.</div>
+                            </div>
 
-                                    <div class="mb-3">
-                                        <label class="form-label fw-semibold">Basismodel</label>
-                                        <select id="modelSel" class="form-select form-select-sm"></select>
-                                        <div class="form-text">Kies YOLO-basismodel of gebruik "Resume" hieronder.</div>
-                                    </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Basismodel</label>
+                                <select id="modelSel" class="form-select form-select-sm"></select>
+                                <div class="form-text">Kies YOLO-basismodel of gebruik "Resume" hieronder.</div>
+                            </div>
 
-                                    <div class="mb-3">
-                                        <label class="form-label fw-semibold">Resume van bestaand model</label>
-                                        <div class="d-flex gap-2">
-                                            <select id="resumeSel" class="form-select form-select-sm">
-                                                <option value="">(geen – start vanaf basismodel)</option>
-                                            </select>
-                                            <button id="loadResumeBtn" class="btn btn-outline-secondary btn-sm" type="button">Laad in viewer</button>
-                                        </div>
-                                        <div class="form-text">Kies een eerder getraind <code>best.pt</code> of <code>last.pt</code> om verder te trainen.</div>
-                                    </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Resume van bestaand model</label>
+                                <div class="d-flex gap-2">
+                                    <select id="resumeSel" class="form-select form-select-sm">
+                                        <option value="">(geen – start vanaf basismodel)</option>
+                                    </select>
+                                    <button id="loadResumeBtn" class="btn btn-outline-secondary btn-sm"
+                                        type="button">Laad in viewer</button>
+                                </div>
+                                <div class="form-text">Kies een eerder getraind <code>best.pt</code> of
+                                    <code>last.pt</code> om verder te trainen.</div>
+                            </div>
 
-                                    <div class="row g-2">
-                                        <div class="col-6">
-                                            <label class="form-label fw-semibold">Epochs</label>
-                                            <input id="epochs" type="number" class="form-control form-control-sm" placeholder="bv. 30" />
-                                        </div>
-                                        <div class="col-6">
-                                            <label class="form-label fw-semibold">Batch</label>
-                                            <input id="batch" type="number" class="form-control form-control-sm" placeholder="bv. 16" />
-                                        </div>
-                                        <div class="col-6">
-                                            <label class="form-label fw-semibold">Image size</label>
-                                            <input id="imgsz" type="number" class="form-control form-control-sm" placeholder="bv. 640" />
-                                        </div>
-                                        <div class="col-6">
-                                            <label class="form-label fw-semibold">Learning rate (lr0)</label>
-                                            <input id="lr0" type="number" step="0.0001" class="form-control form-control-sm" placeholder="bv. 0.01" />
-                                        </div>
-                                        <div class="col-6">
-                                            <label class="form-label fw-semibold">Weight decay</label>
-                                            <input id="weightDecay" type="number" step="0.0001" class="form-control form-control-sm" placeholder="bv. 0.0005" />
-                                        </div>
-                                        <div class="col-6">
-                                            <label class="form-label fw-semibold">Patience</label>
-                                            <input id="patience" type="number" class="form-control form-control-sm" placeholder="bv. 50" />
-                                        </div>
-                                    </div>
-
-                                    <div class="form-check my-2">
-                                        <input class="form-check-input" type="checkbox" id="augment">
-                                            <label class="form-check-label" for="augment">Data augmentatie inschakelen</label>
-                                    </div>
-
-                                    <div class="mb-3">
-                                        <label class="form-label fw-semibold" for="exportDir">Exportmap</label>
-                                        <input id="exportDir" class="form-control form-control-sm" value="runs/exported" />
-                                        <div class="form-text">Na training wordt <code>best.pt</code> hierheen gekopieerd.</div>
-                                    </div>
-
-
-                                    <div class="mb-3">
-                                        <label class="form-label fw-semibold">Afbeeldingen</label>
-                                        <div class="d-flex gap-2 flex-wrap">
-                                            <button id="pick" class="btn btn-outline-primary btn-sm">Afbeeldingen toevoegen</button>
-                                            <input id="file" type="file" accept="image/*" multiple hidden />
-                                            <button id="sample" class="btn btn-outline-secondary btn-sm">Voorbeelden laden</button>
-                                            <button id="clear" class="btn btn-outline-danger btn-sm">Leegmaken</button>
-                                        </div>
-                                    </div>
-
-                                    <div class="row g-2 mb-3 text-center">
-                                        <div class="col-4">
-                                            <div class="p-2 border rounded-3 bg-light-subtle">
-                                                <div id="kPos" class="fw-bold">0</div>
-                                                <div class="text-muted small">positieven</div>
-                                            </div>
-                                        </div>
-                                        <div class="col-4">
-                                            <div class="p-2 border rounded-3 bg-light-subtle">
-                                                <div id="kNeg" class="fw-bold">0</div>
-                                                <div class="text-muted small">negatieven</div>
-                                            </div>
-                                        </div>
-                                        <div class="col-4">
-                                            <div class="p-2 border rounded-3 bg-light-subtle">
-                                                <div id="kImgs" class="fw-bold">0</div>
-                                                <div class="text-muted small">afbeeldingen</div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <!-- Annotatie-tool -->
-<div class="mb-3">
-  <label class="form-label fw-semibold">Annotatie-tool</label>
-  <div class="btn-group btn-group-sm" role="group" aria-label="Annotatie tool">
-    <input type="radio" class="btn-check" name="tool" id="toolBox" autocomplete="off" checked>
-    <label class="btn btn-outline-primary" for="toolBox">Box</label>
-
-    <input type="radio" class="btn-check" name="tool" id="toolMask" autocomplete="off">
-    <label class="btn btn-outline-primary" for="toolMask">Mask</label>
-  </div>
-  <div class="form-text">
-    <strong>Box:</strong> slepen = positief, <kbd>Shift</kbd> + slepen = negatief.<br>
-    <strong>Mask:</strong> klik punten om een polygoon te tekenen, dubbelklik of “Sluit polygoon” om te sluiten.
-  </div>
-</div>
-
-<!-- Mask toolbar (alleen zichtbaar in Mask-modus) -->
-<div id="maskToolbar" class="d-flex gap-2 mb-3" style="display:none">
-  <button id="maskUndoPoint" class="btn btn-outline-secondary btn-sm" type="button">Undo punt</button>
-  <button id="maskClose" class="btn btn-success btn-sm" type="button">Sluit polygoon</button>
-  <button id="maskUndoPoly" class="btn btn-outline-danger btn-sm" type="button">Verwijder laatste mask</button>
-</div>
-
-
-                                    <div class="d-flex gap-2 flex-wrap mb-3">
-                                        <button id="exportTrain" class="btn btn-warning btn-sm">Exporteer & train (YOLOv8)</button>
-                                        <button id="detectAll" class="btn btn-success btn-sm">Detecteer</button>
-                                        <button id="cancelPoll" class="btn btn-outline-secondary btn-sm" disabled>Stop poll</button>
-                                    </div>
-
-                                    <div class="row g-2 mb-3">
-                                        <div class="col-6">
-                                            <label class="form-label fw-semibold" for="detThresh">Drempel (conf)</label>
-                                            <input id="detThresh" type="number" class="form-control" value="0.5" min="0.01" max="0.99" step="0.01" />
-                                        </div>
-                                        <div class="col-6">
-                                            <label class="form-label fw-semibold" for="detIou">IoU</label>
-                                            <input id="detIou" type="number" class="form-control" value="0.45" min="0.05" max="0.95" step="0.01" />
-                                        </div>
-                                    </div>
-
-                                    <div class="mb-2 small-muted">
-                                        <span class="badge text-bg-secondary" id="status">Gereed</span>
-                                        <span class="ms-2" id="jobInfo"></span>
-                                    </div>
-
-                                    <label class="form-label fw-semibold">Logboek</label>
-                                    <div id="log" class="logbox p-2">Klaar.</div>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label fw-semibold">Epochs</label>
+                                    <input id="epochs" type="number" class="form-control form-control-sm"
+                                        placeholder="bv. 30" />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label fw-semibold">Batch</label>
+                                    <input id="batch" type="number" class="form-control form-control-sm"
+                                        placeholder="bv. 16" />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label fw-semibold">Image size</label>
+                                    <input id="imgsz" type="number" class="form-control form-control-sm"
+                                        placeholder="bv. 640" />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label fw-semibold">Learning rate (lr0)</label>
+                                    <input id="lr0" type="number" step="0.0001" class="form-control form-control-sm"
+                                        placeholder="bv. 0.01" />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label fw-semibold">Weight decay</label>
+                                    <input id="weightDecay" type="number" step="0.0001"
+                                        class="form-control form-control-sm" placeholder="bv. 0.0005" />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label fw-semibold">Patience</label>
+                                    <input id="patience" type="number" class="form-control form-control-sm"
+                                        placeholder="bv. 50" />
                                 </div>
                             </div>
-                        </div>
-                    </aside>
 
-                    <!-- Images -->
-                    <section class="col-12 col-xl-9 order-2">
-                        <div id="thumbs" class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xxl-4 g-4"></div>
-                    </section>
-                </div>
-            </main>
-
-            <!-- Help Modal -->
-            <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel" aria-hidden="true">
-                <div class="modal-dialog modal-lg modal-dialog-scrollable">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title" id="helpModalLabel">Trainer – handleiding & tips</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Sluiten"></button>
-                        </div>
-
-                        <div class="modal-body">
-                            <!-- Wat doet deze pagina? -->
-                            <p class="small">
-                                Met deze trainer maak je een <strong>objectdetector</strong> (YOLOv8) voor één klasse
-                                (bijv. <code>Moer</code> of <code>ABSring</code>). Je tekent vakjes rondom het object
-                                (positief) en, waar nuttig, vakjes op storende dingen (negatief). Daarna train je het model.
-                                De beste versie (<code>best.pt</code>) wordt bewaard en direct geladen in de live viewer.
-                            </p>
-
-                            <!-- Annoteren -->
-                            <h6 class="mt-4">Annoteren (positief/negatief)</h6>
-                            <ul class="small mb-3">
-                                <li><strong>Positieve box</strong> – Sleep met de muis <em>zonder</em> toetsen om het doelobject te omlijnen. Dit zijn de voorbeelden waar het model van leert “<em>dít is het</em>”.</li>
-                                <li><strong>Negatieve box</strong> – Sleep met <kbd>Shift</kbd> ingedrukt over een <em>look-alike</em> of storend object dat <em>niet</em> het doel is. Dit leert het model “<em>dít is het níet</em>” en vermindert <em>false positives</em>.</li>
-                                <li><strong>Undo</strong> – Rechtermuisklik verwijdert de laatste box.</li>
-                                <li><strong>Tips</strong> – Omlijn strak (weinig lege achtergrond). Label verschillende hoeken, afstanden en lichtsituaties. Voeg ook foto’s toe waar het object niet voorkomt (alleen negatief).</li>
-                            </ul>
-
-                            <!-- Dataset tips -->
-                            <h6>Dataset: hoeveel en welke beelden?</h6>
-                            <ul class="small mb-3">
-                                <li><strong>Aantal</strong> – Start met 30–100+ beelden. Meer variatie = beter (ander licht, afstand, achtergrond).</li>
-                                <li><strong>Variatie</strong> – Voeg ook ‘moeilijke’ gevallen toe (deels bedekt, klein in beeld, tegenlicht).</li>
-                                <li><strong>Negatieven</strong> – Label look-alikes (schroeven, kabels, andere ringen) met <kbd>Shift</kbd>-boxen om verwarring te voorkomen.</li>
-                            </ul>
-
-                            <!-- Uitleg van alle velden in de sidebar -->
-                            <h6>Knoppen & velden – wat doet wat?</h6>
-
-                            <div class="small mb-3">
-                                <p class="mb-1"><strong>Basismodel</strong> (<code>yolov8n</code> of <code>yolov8s</code>)</p>
-                                <ul class="mb-2">
-                                    <li><code>yolov8n</code>: klein & snel (goed om te starten, lage latency).</li>
-                                    <li><code>yolov8s</code>: iets zwaarder, vaak nauwkeuriger (beter als je genoeg data hebt).</li>
-                                </ul>
-
-                                <p class="mb-1"><strong>Resume van bestaand model</strong></p>
-                                <ul class="mb-2">
-                                    <li>Kies een eerder getrainde <code>best.pt</code> of <code>last.pt</code> om verder te trainen met nieuwe data.</li>
-                                    <li><em>Gebruik dit</em> als je hetzelfde object stap voor stap wilt verbeteren.</li>
-                                </ul>
-
-                                <p class="mb-1"><strong>Epochs</strong> (hoe vaak het model de dataset doorloopt)</p>
-                                <ul class="mb-2">
-                                    <li><em>Begin</em> met 20–30. Bij meer data of nog niet stabiele prestaties kun je verhogen.</li>
-                                    <li>Te weinig → model leert niet genoeg. Te veel → risico op <em>overfitting</em> (te goed op training, slecht op nieuw beeld).</li>
-                                </ul>
-
-                                <p class="mb-1"><strong>Batch</strong> (hoeveel beelden tegelijk)</p>
-                                <ul class="mb-2">
-                                    <li>Hogere batch traint vaak stabieler, maar kost meer geheugen. 8–16 is vaak prima.</li>
-                                </ul>
-
-                                <p class="mb-1"><strong>Image size (imgsz)</strong> (resolutie tijdens training)</p>
-                                <ul class="mb-2">
-                                    <li>640 is een goed startpunt. Hoger kan meer detail leren (langzamer), lager is sneller maar mist detail.</li>
-                                </ul>
-
-                                <p class="mb-1"><strong>Learning rate (lr0)</strong> (hoe snel het model leert)</p>
-                                <ul class="mb-2">
-                                    <li>Begin rond <code>0.01</code>. Te hoog = schiet heen en weer te laag = leert traag.</li>
-                                </ul>
-
-                                <p class="mb-1"><strong>Weight decay</strong> (regularisatie tegen overfitting)</p>
-                                <ul class="mb-2">
-                                    <li>Begin rond <code>0.0005</code>. Houd dit meestal zo tenzij je duidelijke overfitting ziet.</li>
-                                </ul>
-
-                                <p class="mb-1"><strong>Patience</strong> (vroegtijdig stoppen als het niet verbetert)</p>
-                                <ul class="mb-2">
-                                    <li>Bijv. <code>50</code>. Het model stopt als het te lang niet beter wordt. Bespaart tijd.</li>
-                                </ul>
-
-                                <p class="mb-1"><strong>Data augmentatie</strong> (variatie toevoegen tijdens training)</p>
-                                <ul class="mb-2">
-                                    <li>Aanvinken als je dataset klein/eenzijdig is. Het model ziet dan ‘nepvariaties’ (rotaties, flips, etc.).</li>
-                                </ul>
-
-                                <p class="mb-1"><strong>Exportmap</strong></p>
-                                <ul class="mb-0">
-                                    <li>Hier wordt <code>best.pt</code> na training gekopieerd (standaard: <code>runs/exported</code>).</li>
-                                </ul>
+                            <div class="form-check my-2">
+                                <input class="form-check-input" type="checkbox" id="augment">
+                                <label class="form-check-label" for="augment">Data augmentatie inschakelen</label>
                             </div>
 
-                            <!-- Detectie instellingen -->
-                            <h6>Detectie & drempels</h6>
-                            <ul class="small mb-3">
-                                <li><strong>Drempel (Conf)</strong> – Hoe zeker moet het model zijn voordat het ‘ja’ zegt?<br>
-                                    Start met <code>0.25–0.5</code>. Lager = gevoeliger (meer true én false positives). Hoger = strenger (minder ruis, maar mogelijk echte missers).</li>
-                                <li><strong>IoU</strong> – Overlapdrempel bij het samenvoegen van overlappende boxen (NMS).<br>
-                                    Laat meestal op <code>0.45–0.5</code>. Lager = sneller samenvoegen; hoger = laat meer overlappende boxen staan.</li>
-                            </ul>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold" for="exportDir">Exportmap</label>
+                                <input id="exportDir" class="form-control form-control-sm" value="runs/exported" />
+                                <div class="form-text">Na training wordt <code>best.pt</code> hierheen gekopieerd.</div>
+                            </div>
 
-                            <!-- Workflow smartphone -->
-                            <h6>Foto’s toevoegen vanaf smartphone</h6>
-                            <ul class="small mb-3">
-                                <li>Open op je telefoon <code>/sender</code> op dezelfde server (bijv. <code>https://&lt;jouw-host&gt;/sender</code>).</li>
-                                <li>Maak foto’s – ze verschijnen automatisch hier in de trainer om direct te labelen.</li>
-                            </ul>
 
-                            <!-- Export -->
-                            <h6>Export & download</h6>
-                            <ul class="small mb-3">
-                                <li>Na training verschijnt een <strong>Download</strong>-knop voor <code>best.pt</code>.</li>
-                            </ul>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Afbeeldingen</label>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <button id="pick" class="btn btn-outline-primary btn-sm">Afbeeldingen
+                                        toevoegen</button>
+                                    <input id="file" type="file" accept="image/*" multiple hidden />
+                                    <button id="sample" class="btn btn-outline-secondary btn-sm">Voorbeelden
+                                        laden</button>
+                                    <button id="clear" class="btn btn-outline-danger btn-sm">Leegmaken</button>
+                                </div>
+                            </div>
 
-                            <!-- Troubleshooting -->
-                            <h6>Veelvoorkomende problemen & oplossingen</h6>
-                            <ul class="small mb-3">
-                                <li><strong>Lage confidence</strong> – Voeg méér en gevarieerdere positieve voorbeelden toe, label look-alikes negatief, maak boxen strakker, probeer <code>yolov8s</code> of meer epochs.</li>
-                                <li><strong>Geen detecties</strong> – Verlaag de drempel (bijv. naar <code>0.2</code>) en test opnieuw. Controleer of je labeltjes (positieve boxen) aanwezig zijn.</li>
-                                <li><strong>Overfitting</strong> – Meer variatie/negatieven, schakel augmentatie in, verhoog <code>weight_decay</code> licht, leg data apart.</li>
-                            </ul>
+                            <div class="row g-2 mb-3 text-center">
+                                <div class="col-4">
+                                    <div class="p-2 border rounded-3 bg-light-subtle">
+                                        <div id="kPos" class="fw-bold">0</div>
+                                        <div class="text-muted small">positieven</div>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="p-2 border rounded-3 bg-light-subtle">
+                                        <div id="kNeg" class="fw-bold">0</div>
+                                        <div class="text-muted small">negatieven</div>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="p-2 border rounded-3 bg-light-subtle">
+                                        <div id="kImgs" class="fw-bold">0</div>
+                                        <div class="text-muted small">afbeeldingen</div>
+                                    </div>
+                                </div>
+                            </div>
 
-                            <!-- Mini woordenlijst -->
-                            <h6>Mini-woordenlijst</h6>
-                            <ul class="small mb-0">
-                                <li><strong>Epoch</strong> – Eén volledige ronde langs alle trainingsbeelden.</li>
-                                <li><strong>Batch</strong> – Aantal beelden dat tegelijk verwerkt wordt.</li>
-                                <li><strong>Confidence</strong> – Zekerheid van de detectie (0–1).</li>
-                                <li><strong>IoU</strong> – Overlap tussen twee boxen (0–1).</li>
-                                <li><strong>False positive</strong> – Het model denkt dat iets jouw object is, maar dat is het niet.</li>
-                                <li><strong>Overfitting</strong> – Het model is té goed op de trainingsbeelden, maar presteert slecht op nieuwe beelden.</li>
-                            </ul>
-                        </div>
+                            <!-- Annotatie-tool -->
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Annotatie-tool</label>
+                                <div class="btn-group btn-group-sm" role="group" aria-label="Annotatie tool">
+                                    <input type="radio" class="btn-check" name="tool" id="toolBox" autocomplete="off"
+                                        checked>
+                                    <label class="btn btn-outline-primary" for="toolBox">Box</label>
 
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Sluiten</button>
+                                    <input type="radio" class="btn-check" name="tool" id="toolMask" autocomplete="off">
+                                    <label class="btn btn-outline-primary" for="toolMask">Mask</label>
+                                </div>
+                                <div class="form-text">
+                                    <strong>Box:</strong> slepen = positief, <kbd>Shift</kbd> + slepen = negatief.<br>
+                                    <strong>Mask:</strong> klik punten om een polygoon te tekenen, dubbelklik of “Sluit
+                                    polygoon” om te sluiten.
+                                </div>
+                            </div>
+
+                            <!-- Mask toolbar (alleen zichtbaar in Mask-modus) -->
+                            <div id="maskToolbar" class="d-flex gap-2 mb-3" style="display:none">
+                                <button id="maskUndoPoint" class="btn btn-outline-secondary btn-sm" type="button">Undo
+                                    punt</button>
+                                <button id="maskClose" class="btn btn-success btn-sm" type="button">Sluit
+                                    polygoon</button>
+                                <button id="maskUndoPoly" class="btn btn-outline-danger btn-sm" type="button">Verwijder
+                                    laatste mask</button>
+                            </div>
+
+
+                            <div class="d-flex gap-2 flex-wrap mb-3">
+                                <button id="exportTrain" class="btn btn-warning btn-sm">Exporteer & train
+                                    (YOLOv8)</button>
+                                <button id="detectAll" class="btn btn-success btn-sm">Detecteer</button>
+                                <button id="cancelPoll" class="btn btn-outline-secondary btn-sm" disabled>Stop
+                                    poll</button>
+                            </div>
+
+                            <div class="row g-2 mb-3">
+                                <div class="col-6">
+                                    <label class="form-label fw-semibold" for="detThresh">Drempel (conf)</label>
+                                    <input id="detThresh" type="number" class="form-control" value="0.5" min="0.01"
+                                        max="0.99" step="0.01" />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label fw-semibold" for="detIou">IoU</label>
+                                    <input id="detIou" type="number" class="form-control" value="0.45" min="0.05"
+                                        max="0.95" step="0.01" />
+                                </div>
+                            </div>
+
+                            <div class="mb-2 small-muted">
+                                <span class="badge text-bg-secondary" id="status">Gereed</span>
+                                <span class="ms-2" id="jobInfo"></span>
+                            </div>
+
+                            <label class="form-label fw-semibold">Logboek</label>
+                            <div id="log" class="logbox p-2">Klaar.</div>
                         </div>
                     </div>
                 </div>
+            </aside>
+
+            <!-- Images -->
+            <section class="col-12 col-xl-9 order-2">
+                <div id="thumbs" class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xxl-4 g-4"></div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Help Modal -->
+    <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="helpModalLabel">Trainer – handleiding & tips</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Sluiten"></button>
+                </div>
+
+                <div class="modal-body">
+                    <!-- Wat doet deze pagina? -->
+                    <p class="small">
+                        Met deze trainer maak je een <strong>objectdetector</strong> (YOLOv8) voor één klasse
+                        (bijv. <code>Moer</code> of <code>ABSring</code>). Je tekent vakjes rondom het object
+                        (positief) en, waar nuttig, vakjes op storende dingen (negatief). Daarna train je het model.
+                        De beste versie (<code>best.pt</code>) wordt bewaard en direct geladen in de live viewer.
+                    </p>
+
+                    <!-- Annoteren -->
+                    <h6 class="mt-4">Annoteren (positief/negatief)</h6>
+                    <ul class="small mb-3">
+                        <li><strong>Positieve box</strong> – Sleep met de muis <em>zonder</em> toetsen om het doelobject
+                            te omlijnen. Dit zijn de voorbeelden waar het model van leert “<em>dít is het</em>”.</li>
+                        <li><strong>Negatieve box</strong> – Sleep met <kbd>Shift</kbd> ingedrukt over een
+                            <em>look-alike</em> of storend object dat <em>niet</em> het doel is. Dit leert het model
+                            “<em>dít is het níet</em>” en vermindert <em>false positives</em>.</li>
+                        <li><strong>Undo</strong> – Rechtermuisklik verwijdert de laatste box.</li>
+                        <li><strong>Tips</strong> – Omlijn strak (weinig lege achtergrond). Label verschillende hoeken,
+                            afstanden en lichtsituaties. Voeg ook foto’s toe waar het object niet voorkomt (alleen
+                            negatief).</li>
+                    </ul>
+
+                    <!-- Dataset tips -->
+                    <h6>Dataset: hoeveel en welke beelden?</h6>
+                    <ul class="small mb-3">
+                        <li><strong>Aantal</strong> – Start met 30–100+ beelden. Meer variatie = beter (ander licht,
+                            afstand, achtergrond).</li>
+                        <li><strong>Variatie</strong> – Voeg ook ‘moeilijke’ gevallen toe (deels bedekt, klein in beeld,
+                            tegenlicht).</li>
+                        <li><strong>Negatieven</strong> – Label look-alikes (schroeven, kabels, andere ringen) met
+                            <kbd>Shift</kbd>-boxen om verwarring te voorkomen.</li>
+                    </ul>
+
+                    <!-- Uitleg van alle velden in de sidebar -->
+                    <h6>Knoppen & velden – wat doet wat?</h6>
+
+                    <div class="small mb-3">
+                        <p class="mb-1"><strong>Basismodel</strong> (<code>yolov8n</code> of <code>yolov8s</code>)</p>
+                        <ul class="mb-2">
+                            <li><code>yolov8n</code>: klein & snel (goed om te starten, lage latency).</li>
+                            <li><code>yolov8s</code>: iets zwaarder, vaak nauwkeuriger (beter als je genoeg data hebt).
+                            </li>
+                        </ul>
+
+                        <p class="mb-1"><strong>Resume van bestaand model</strong></p>
+                        <ul class="mb-2">
+                            <li>Kies een eerder getrainde <code>best.pt</code> of <code>last.pt</code> om verder te
+                                trainen met nieuwe data.</li>
+                            <li><em>Gebruik dit</em> als je hetzelfde object stap voor stap wilt verbeteren.</li>
+                        </ul>
+
+                        <p class="mb-1"><strong>Epochs</strong> (hoe vaak het model de dataset doorloopt)</p>
+                        <ul class="mb-2">
+                            <li><em>Begin</em> met 20–30. Bij meer data of nog niet stabiele prestaties kun je verhogen.
+                            </li>
+                            <li>Te weinig → model leert niet genoeg. Te veel → risico op <em>overfitting</em> (te goed
+                                op training, slecht op nieuw beeld).</li>
+                        </ul>
+
+                        <p class="mb-1"><strong>Batch</strong> (hoeveel beelden tegelijk)</p>
+                        <ul class="mb-2">
+                            <li>Hogere batch traint vaak stabieler, maar kost meer geheugen. 8–16 is vaak prima.</li>
+                        </ul>
+
+                        <p class="mb-1"><strong>Image size (imgsz)</strong> (resolutie tijdens training)</p>
+                        <ul class="mb-2">
+                            <li>640 is een goed startpunt. Hoger kan meer detail leren (langzamer), lager is sneller
+                                maar mist detail.</li>
+                        </ul>
+
+                        <p class="mb-1"><strong>Learning rate (lr0)</strong> (hoe snel het model leert)</p>
+                        <ul class="mb-2">
+                            <li>Begin rond <code>0.01</code>. Te hoog = schiet heen en weer te laag = leert traag.</li>
+                        </ul>
+
+                        <p class="mb-1"><strong>Weight decay</strong> (regularisatie tegen overfitting)</p>
+                        <ul class="mb-2">
+                            <li>Begin rond <code>0.0005</code>. Houd dit meestal zo tenzij je duidelijke overfitting
+                                ziet.</li>
+                        </ul>
+
+                        <p class="mb-1"><strong>Patience</strong> (vroegtijdig stoppen als het niet verbetert)</p>
+                        <ul class="mb-2">
+                            <li>Bijv. <code>50</code>. Het model stopt als het te lang niet beter wordt. Bespaart tijd.
+                            </li>
+                        </ul>
+
+                        <p class="mb-1"><strong>Data augmentatie</strong> (variatie toevoegen tijdens training)</p>
+                        <ul class="mb-2">
+                            <li>Aanvinken als je dataset klein/eenzijdig is. Het model ziet dan ‘nepvariaties’
+                                (rotaties, flips, etc.).</li>
+                        </ul>
+
+                        <p class="mb-1"><strong>Exportmap</strong></p>
+                        <ul class="mb-0">
+                            <li>Hier wordt <code>best.pt</code> na training gekopieerd (standaard:
+                                <code>runs/exported</code>).</li>
+                        </ul>
+                    </div>
+
+                    <!-- Detectie instellingen -->
+                    <h6>Detectie & drempels</h6>
+                    <ul class="small mb-3">
+                        <li><strong>Drempel (Conf)</strong> – Hoe zeker moet het model zijn voordat het ‘ja’ zegt?<br>
+                            Start met <code>0.25–0.5</code>. Lager = gevoeliger (meer true én false positives). Hoger =
+                            strenger (minder ruis, maar mogelijk echte missers).</li>
+                        <li><strong>IoU</strong> – Overlapdrempel bij het samenvoegen van overlappende boxen (NMS).<br>
+                            Laat meestal op <code>0.45–0.5</code>. Lager = sneller samenvoegen; hoger = laat meer
+                            overlappende boxen staan.</li>
+                    </ul>
+
+                    <!-- Workflow smartphone -->
+                    <h6>Foto’s toevoegen vanaf smartphone</h6>
+                    <ul class="small mb-3">
+                        <li>Open op je telefoon <code>/sender</code> op dezelfde server (bijv.
+                            <code>https://&lt;jouw-host&gt;/sender</code>).</li>
+                        <li>Maak foto’s – ze verschijnen automatisch hier in de trainer om direct te labelen.</li>
+                    </ul>
+
+                    <!-- Export -->
+                    <h6>Export & download</h6>
+                    <ul class="small mb-3">
+                        <li>Na training verschijnt een <strong>Download</strong>-knop voor <code>best.pt</code>.</li>
+                    </ul>
+
+                    <!-- Troubleshooting -->
+                    <h6>Veelvoorkomende problemen & oplossingen</h6>
+                    <ul class="small mb-3">
+                        <li><strong>Lage confidence</strong> – Voeg méér en gevarieerdere positieve voorbeelden toe,
+                            label look-alikes negatief, maak boxen strakker, probeer <code>yolov8s</code> of meer
+                            epochs.</li>
+                        <li><strong>Geen detecties</strong> – Verlaag de drempel (bijv. naar <code>0.2</code>) en test
+                            opnieuw. Controleer of je labeltjes (positieve boxen) aanwezig zijn.</li>
+                        <li><strong>Overfitting</strong> – Meer variatie/negatieven, schakel augmentatie in, verhoog
+                            <code>weight_decay</code> licht, leg data apart.</li>
+                    </ul>
+
+                    <!-- Mini woordenlijst -->
+                    <h6>Mini-woordenlijst</h6>
+                    <ul class="small mb-0">
+                        <li><strong>Epoch</strong> – Eén volledige ronde langs alle trainingsbeelden.</li>
+                        <li><strong>Batch</strong> – Aantal beelden dat tegelijk verwerkt wordt.</li>
+                        <li><strong>Confidence</strong> – Zekerheid van de detectie (0–1).</li>
+                        <li><strong>IoU</strong> – Overlap tussen twee boxen (0–1).</li>
+                        <li><strong>False positive</strong> – Het model denkt dat iets jouw object is, maar dat is het
+                            niet.</li>
+                        <li><strong>Overfitting</strong> – Het model is té goed op de trainingsbeelden, maar presteert
+                            slecht op nieuwe beelden.</li>
+                    </ul>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Sluiten</button>
+                </div>
             </div>
+        </div>
+    </div>
 
-            <script>
-    document.querySelectorAll('.nav-link').forEach(a=>{
-      if (a.getAttribute('href') === window.location.pathname) a.classList.add('active');
-    });
-            </script>
+    <script>
+        document.querySelectorAll('.nav-link').forEach(a => {
+            if (a.getAttribute('href') === window.location.pathname) a.classList.add('active');
+        });
+    </script>
 
-            <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
-            <script src="/static/trainer.js"></script>
-        </body>
-    </html>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        crossorigin="anonymous"></script>
+    <script src="/static/trainer.js"></script>
+</body>
+
+</html>
