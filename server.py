@@ -278,6 +278,8 @@ class AppConfig(BaseModel):
     contour_match_enabled: bool = True
     contour_match_class: str = "hole"
     contour_match_iop: float = 0.60
+    active_contour_ids: Optional[List[str]] = None
+    active_contour_id: Optional[str] = None
 
 config = AppConfig()
 
@@ -486,6 +488,46 @@ def _list_trained_models() -> list[dict]:
     # meest recent boven
     items.sort(key=lambda x: x["mtime"], reverse=True)
     return items
+
+def _present_to_map(present_list: list[dict]) -> dict[str, int]:
+    # [{"label": "earbud", "count": 2}, ...] -> {"earbud": 2, ...}
+    m = {}
+    for it in present_list:
+        try:
+            m[str(it["label"]).strip().lower()] = int(it["count"])
+        except Exception:
+            pass
+    return m
+
+def _get_actual_for(name: str, m: dict[str, int]) -> int:
+    # simpele toleranties: enkelvoud/meervoud
+    n = str(name).strip().lower()
+    cand = {n, (n[:-1] if n.endswith("s") else n + "s")}
+    for k in m.keys():
+        if k in cand:
+            return int(m[k])
+    return int(m.get(n, 0))
+
+def _match_products_by_properties(present_list: list[dict]) -> list[str]:
+    """Product 'matcht' wanneer ALLE properties >0 exact gehaald zijn."""
+    pmap = _present_to_map(present_list)
+    out = []
+    for p in _load_products():
+        props = p.get("properties") or {}
+        expected_pairs = [(k, v) for k, v in props.items()
+                          if isinstance(v, (int, float)) and int(v) != 0]
+        if not expected_pairs:
+            continue
+        ok = True
+        for name, exp in expected_pairs:
+            act = _get_actual_for(str(name), pmap)
+            if int(act) != int(exp):
+                ok = False
+                break
+        if ok:
+            out.append(p.get("id"))
+    return out
+
 
 def _short_base_key(path_or_name: str) -> str:
     """
@@ -789,20 +831,32 @@ def infer_loop():
         # (d) contour matching (IoP)
         contour_hits = []
         matched_product_ids = set()
-        match_regions = []  # <-- bboxen van succesvolle templates
+        match_regions = []
+        templates = _load_contours()
+
         try:
-            if getattr(config, "contour_match_enabled", True):
+            if not getattr(config, "contour_match_enabled", True):
+                templates = []
+            else:
+                ids = getattr(config, "active_contour_ids", None)
+                # None = alle; [] = geen; lijst = filter subset
+                if ids is not None:
+                    if len(ids) == 0:
+                        templates = []
+                    else:
+                        idset = {str(x) for x in ids}
+                        templates = [t for t in templates if str(t.get("id")) in idset]
+
+            if templates:
                 h, w = annotated.shape[:2]
-                templates = _load_contours()
                 thr = float(getattr(config, "contour_match_iop", 0.60))
 
-                # (optioneel) templates visueel tonen
+                # (optioneel) geselecteerde templates omlijnen
                 for t in templates:
                     tpl_xy = _denorm_poly(t.get("polygon01", []), w, h)
                     if len(tpl_xy) >= 3:
                         cv2.polylines(annotated, [np.asarray(tpl_xy, np.int32)], True, (255, 255, 0), 2)
 
-                # matchen tegen ALLE mask-polys die er zijn
                 hole_polys = [p for _, polys in (primary_polys + extra_polys) for p in polys if
                               p is not None and len(p) >= 3]
 
@@ -816,18 +870,17 @@ def infer_loop():
                         if iop > best:
                             best = iop
                     if best >= thr:
-                        contour_hits.append({"type_key": t.get("type_key"), "iop": round(best, 3),
-                                             **({"product_id": t.get("product_id") or t.get("productId")}
-                                                if (t.get("product_id") or t.get("productId")) else {})})
-                        if t.get("product_id") or t.get("productId"):
-                            matched_product_ids.add(t.get("product_id") or t.get("productId"))
+                        contour_hits.append({
+                            "type_key": t.get("type_key"),
+                            "iop": round(best, 3),
+                            **({"product_id": t.get("product_id")} if t.get("product_id") else {})
+                        })
+                        if t.get("product_id"):
+                            matched_product_ids.add(t.get("product_id"))
 
-                        # groen omranding + label
                         cv2.polylines(annotated, [np.asarray(tpl_xy, np.int32)], True, (0, 255, 0), 3)
                         cv2.putText(annotated, f"match {t.get('type_key')} ({best * 100:.0f}%)",
                                     tuple(tpl_xy[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-                        # <-- sla de bbox van deze template op om box-tekst te kunnen onderdrukken
                         rx, ry, rw, rh = cv2.boundingRect(np.asarray(tpl_xy, np.int32))
                         match_regions.append((rx, ry, rx + rw, ry + rh))
         except Exception as e:
@@ -858,9 +911,20 @@ def infer_loop():
         except Exception as e:
             print(f"[snapshot] error: {e}")
 
-        # 6) compute present + publish (single WS send)
+        # 6) compute present
         present = Counter(active_labels)
         present_list = [{"label": k, "count": int(v)} for k, v in sorted(present.items())]
+
+        # 6b) fallback: als contouren uit staan of geen templates/matches, probeer property-match
+        try:
+            contour_enabled = getattr(config, "contour_match_enabled", True)
+            # NB: 'templates' bestaat hier nog uit sectie (d)
+            needs_fallback = (not contour_enabled) or not templates
+            if needs_fallback and present_list:
+                fallback_ids = _match_products_by_properties(present_list)
+                matched_product_ids.update(fallback_ids)
+        except Exception as e:
+            print(f"[fallback-match] error: {e}")
 
         latest_frame = annotated
         latest_detections = table_items
@@ -875,7 +939,9 @@ def infer_loop():
                 }
                 if contour_hits:
                     payload["contours"] = contour_hits
+                if matched_product_ids:
                     payload["matched_product_ids"] = list(matched_product_ids)
+
                 asyncio.run_coroutine_threadsafe(broadcast_ws(payload), main_loop)
             except Exception:
                 pass
@@ -1067,6 +1133,8 @@ class ConfigUpdate(BaseModel):
     contour_match_enabled: Optional[bool] = None
     contour_match_class: Optional[str] = None
     contour_match_iop: Optional[float] = None
+    active_contour_ids: Optional[List[str]] = None
+    active_contour_id: Optional[str] = None
 
 @app.get("/api/config")
 async def get_config():
@@ -1100,6 +1168,9 @@ async def update_config(body: ConfigUpdate):
     if body.contour_match_enabled is not None: config.contour_match_enabled = bool(body.contour_match_enabled)
     if body.contour_match_class is not None:   config.contour_match_class = str(body.contour_match_class)
     if body.contour_match_iop is not None:     config.contour_match_iop = float(body.contour_match_iop)
+    if body.active_contour_ids is not None:  config.active_contour_ids = [str(cid).strip() for cid in body.active_contour_ids if str(cid).strip()]
+    if body.active_contour_id is not None: config.active_contour_id = body.active_contour_id or None 
+    if body.active_contour_id is None: config.active_contour_id = None
 
     msg = {
         "type": "config",
@@ -1915,12 +1986,10 @@ async def _on_startup():
     global main_loop, _infer_thread, _cv2_thread
     main_loop = asyncio.get_running_loop()
 
-    # start the infer loop if not running
     if _infer_thread is None or not _infer_thread.is_alive():
         _infer_thread = threading.Thread(target=infer_loop, daemon=True)
         _infer_thread.start()
 
-    # (optional) start cv2 loop if you're using it
     # if _cv2_thread is None or not _cv2_thread.is_alive():
     #     _cv2_thread = threading.Thread(target=cv2_loop, daemon=True)
     #     _cv2_thread.start()

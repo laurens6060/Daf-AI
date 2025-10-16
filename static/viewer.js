@@ -43,6 +43,10 @@
     const showBoxesInp = document.getElementById("showBoxesInp");
     const showContoursInp = document.getElementById("showContoursInp");
 
+    const contoursBox = document.getElementById('contoursBox');
+    const applyContourBtn = document.getElementById('applyContourBtn');
+    const disableContourBtn = document.getElementById('disableContourBtn');
+
     showMasksInp?.addEventListener('change', () => {
         POSTJSON('/api/config', { show_masks: !!showMasksInp.checked })
             .catch(e => alert('Kon show_masks niet opslaan: ' + e.message));
@@ -224,6 +228,139 @@
         return out;
     }
 
+
+    function computePropertyCheck(prod, presentMap) {
+        const res = { mismatches: [], oks: [] };
+        if (!prod || !prod.properties || typeof prod.properties !== 'object') return res;
+
+        for (const [name, expectedRaw] of Object.entries(prod.properties)) {
+            const expected = Number(expectedRaw);
+            if (!Number.isFinite(expected) || expected === 0) continue; // 0 = geen check
+
+            const actual = getActualCountFor(name, presentMap); // ← tolerant
+            if (actual !== expected) {
+                res.mismatches.push(`Productiefout: ziet ${actual} ${name}, moet ${expected} ${name} zien.`);
+            } else {
+                res.oks.push(`Zoekt ${expected} ${name}, ziet ${actual} ${name}.`);
+                // res.oks.push(`Zoekt ${expected} aantal ${name}, ziet ${actual} aantal ${name}.`);
+            }
+        }
+        return res;
+    }
+
+    async function loadContoursList() {
+        if (!contoursBox) return;
+        contoursBox.innerHTML = '<div class="text-muted">Laden…</div>';
+        try {
+            const items = await GET('/api/contours');
+            if (!items.length) {
+                contoursBox.innerHTML = '<div class="text-muted">Geen contouren</div>';
+                return;
+            }
+            contoursBox.innerHTML = items.map(c => `
+      <label class="list-group-item d-flex align-items-center justify-content-between">
+        <span>${esc(c.name)} <span class="text-muted">(${esc(c.type_key || '')})</span></span>
+        <input class="form-check-input" type="checkbox" name="contourChk" value="${esc(c.id)}">
+      </label>
+    `).join('');
+        } catch (e) {
+            contoursBox.innerHTML = `<div class="text-danger">Contourlijst laden mislukt</div>`;
+        }
+    }
+
+    applyContourBtn?.addEventListener('click', async () => {
+        const ids = Array.from(document.querySelectorAll('input[name="contourChk"]:checked'))
+            .map(el => el.value);
+        try {
+            await POSTJSON('/api/config', {
+                contour_match_enabled: true,
+                active_contour_ids: ids  // [] = geen; lijst = subset; (weg laten of null = alle)
+            });
+        } catch (e) {
+            alert('Kon contour selectie toepassen: ' + e.message);
+        }
+    });
+
+    disableContourBtn?.addEventListener('click', async () => {
+        try {
+            await POSTJSON('/api/config', {
+                contour_match_enabled: false,
+                active_contour_ids: []  // expliciet leeg (geen contouren actief)
+            });
+        } catch (e) {
+            alert('Kon contour uitschakelen: ' + e.message);
+        }
+    });
+
+
+
+    /**
+     * Plaats (of verwijder) een alert-rij direct onder de product rij in de tabel.
+     */
+    function renderProductAlertRow(pid, check) {
+        const tr = document.querySelector(
+            `#productsBody tr.product-row[data-pid="${CSS.escape(String(pid))}"]`
+        );
+        if (!tr) return;
+
+        // oude alert-rij weg
+        const next = tr.nextElementSibling;
+        if (next && next.matches('.product-alert-row') && next.dataset.pid === String(pid)) {
+            next.remove();
+        }
+
+        // niets te tonen (geen properties met >0)
+        if (!check || (check.mismatches.length === 0 && check.oks.length === 0)) return;
+
+        const isOk = check.mismatches.length === 0;
+        const messages = isOk ? check.oks : check.mismatches;
+        const cls = isOk ? 'alert-success' : 'alert-danger';
+
+        const alertTr = document.createElement('tr');
+        alertTr.className = 'product-alert-row';
+        alertTr.dataset.pid = String(pid);
+        alertTr.innerHTML = `
+    <td colspan="2" class="product-alert">
+      <div class="alert ${cls}" role="alert">
+        ${messages.map(m => `<div>${m}</div>`).join('')}
+      </div>
+    </td>
+  `;
+        tr.insertAdjacentElement('afterend', alertTr);
+    }
+
+
+    /**
+     * Voor alle gematchte producten: (her)bereken en toon de alerts.
+     * Voor niet-gematchte producten: alerts weghalen.
+     */
+    function updateAllProductAlerts(matchedIds) {
+        const idSet = new Set((matchedIds || []).map(String));
+
+        document.querySelectorAll('#productsBody tr.product-row[data-pid]').forEach(tr => {
+            const pid = String(tr.dataset.pid);
+
+            // als product niet (meer) gematcht is, alert weghalen
+            const next = tr.nextElementSibling;
+            if (!idSet.has(pid)) {
+                if (next && next.matches('.product-alert-row') && next.dataset.pid === pid) next.remove();
+                return;
+            }
+
+            const prod = productById(pid);
+            const check = computePropertyCheck(prod, presentMap);
+            renderProductAlertRow(pid, check);
+
+            if (check.mismatches.length) {
+                renderProductAlertRow(pid, check);
+                // voeg toe:
+                sendRejectIfNew(pid, prod, presentMap);
+            } else {
+                renderProductAlertRow(pid, check); // groen OK, geen foto
+            }
+        });
+    }
+
     async function sendRejectIfNew(pid, prod, pmap) {
         const mism = detailedMismatches(prod, pmap);
         if (!mism.length) return;               // niets fout → niets sturen
@@ -243,8 +380,6 @@
             console.warn('Kon reject niet opslaan:', e);
         }
     }
-
-
 
     // ====== helpers voor product-mismatch alerts ======
     function productById(pid) {
@@ -272,62 +407,6 @@
         return msgs;
     }
 
-
-    /**
-     * Plaats (of verwijder) een alert-rij direct onder de product rij in de tabel.
-     */
-    function renderProductAlertRow(pid, messages) {
-        const tr = document.querySelector(`#productsBody tr.product-row[data-pid="${CSS.escape(String(pid))}"]`);
-        if (!tr) return;
-
-        // oude rij opruimen
-        const next = tr.nextElementSibling;
-        if (next && next.matches('.product-alert-row') && next.dataset.pid === String(pid)) next.remove();
-
-        if (!messages || !messages.length) return;
-
-        // nieuwe alert tonen
-        const alertTr = document.createElement('tr');
-        alertTr.className = 'product-alert-row';
-        alertTr.dataset.pid = String(pid);
-        alertTr.innerHTML = `
-    <td colspan="2" class="product-alert">
-      <div class="alert alert-danger" role="alert">
-        ${messages.map(m => `<div>${m}</div>`).join('')}
-        <div class="mt-2">
-          <a class="btn btn-sm btn-outline-light" href="/rejects-ui" target="_blank" rel="noopener">Bekijk afgekeurde producten</a>
-        </div>
-      </div>
-    </td>`;
-        tr.insertAdjacentElement('afterend', alertTr);
-
-        // --> stuur reject (met debounce)
-        const prod = productById(pid);
-        sendRejectIfNew(pid, prod, presentMap);
-    }
-
-
-    /**
-     * Voor alle gematchte producten: (her)bereken en toon de alerts.
-     * Voor niet-gematchte producten: alerts weghalen.
-     */
-    function updateAllProductAlerts(matchedIds) {
-        const idSet = new Set((matchedIds || []).map(String));
-
-        // loop alle product-rijen
-        document.querySelectorAll('#productsBody tr.product-row[data-pid]').forEach(tr => {
-            const pid = String(tr.dataset.pid);
-            if (!idSet.has(pid)) {
-                // niet (meer) gematcht → alert weg
-                const next = tr.nextElementSibling;
-                if (next && next.matches('.product-alert-row') && next.dataset.pid === pid) next.remove();
-                return;
-            }
-            const prod = productById(pid);
-            const mismatches = computePropertyMismatches(prod, presentMap);
-            renderProductAlertRow(pid, mismatches);
-        });
-    }
 
 
     // ===== WebSocket verbinding met backend =====
@@ -759,7 +838,8 @@
     (async () => {
         await loadModelLists();
         await loadCollections();
-        await loadProducts(null); // geen filter -> toon alle producten
+        await loadProducts(null);
+        await loadContoursList();
         highlightProducts(lastMatchedProductIds);
     })();
 })();
