@@ -97,16 +97,20 @@
             - 3 kolommen op grote schermen
             - Stackt onder elkaar op mobiel
        ========================= -->
+
     <main class="container-fluid my-4">
         <div class="row g-4">
-
             <!-- ===== Kolom 1: Live video (6/12 op lg) ===== -->
             <section class="col-12 col-lg-6">
-                <div class="card shadow-sm">
-                    <div class="card-body">
-                        <h2 class="h4 mb-3">Live Video</h2>
-                        <!-- MJPEG-stream vanaf /video_feed -->
+                <div class="card border-0 shadow-sm">
+                    <div class="card-title px-3 pt-3">
+                        <h1 class="h5 mb-0">Live Viewer</h1>
+                    </div>
+                    <div class="position-relative">
                         <img id="video" src="/video_feed" alt="video">
+                        <canvas id="overlay" class="position-absolute top-0 start-0 w-100 h-100"
+                            style="pointer-events:none; z-index:2;"></canvas>
+
                     </div>
                 </div>
             </section>
