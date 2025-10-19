@@ -119,7 +119,8 @@
                                         type="button">Laad in viewer</button>
                                 </div>
                                 <div class="form-text">Kies een eerder getraind <code>best.pt</code> of
-                                    <code>last.pt</code> om verder te trainen.</div>
+                                    <code>last.pt</code> om verder te trainen.
+                                </div>
                             </div>
 
                             <div class="row g-2">
@@ -294,7 +295,8 @@
                             te omlijnen. Dit zijn de voorbeelden waar het model van leert “<em>dít is het</em>”.</li>
                         <li><strong>Negatieve box</strong> – Sleep met <kbd>Shift</kbd> ingedrukt over een
                             <em>look-alike</em> of storend object dat <em>niet</em> het doel is. Dit leert het model
-                            “<em>dít is het níet</em>” en vermindert <em>false positives</em>.</li>
+                            “<em>dít is het níet</em>” en vermindert <em>false positives</em>.
+                        </li>
                         <li><strong>Undo</strong> – Rechtermuisklik verwijdert de laatste box.</li>
                         <li><strong>Tips</strong> – Omlijn strak (weinig lege achtergrond). Label verschillende hoeken,
                             afstanden en lichtsituaties. Voeg ook foto’s toe waar het object niet voorkomt (alleen
@@ -309,7 +311,8 @@
                         <li><strong>Variatie</strong> – Voeg ook ‘moeilijke’ gevallen toe (deels bedekt, klein in beeld,
                             tegenlicht).</li>
                         <li><strong>Negatieven</strong> – Label look-alikes (schroeven, kabels, andere ringen) met
-                            <kbd>Shift</kbd>-boxen om verwarring te voorkomen.</li>
+                            <kbd>Shift</kbd>-boxen om verwarring te voorkomen.
+                        </li>
                     </ul>
 
                     <!-- Uitleg van alle velden in de sidebar -->
@@ -375,7 +378,8 @@
                         <p class="mb-1"><strong>Exportmap</strong></p>
                         <ul class="mb-0">
                             <li>Hier wordt <code>best.pt</code> na training gekopieerd (standaard:
-                                <code>runs/exported</code>).</li>
+                                <code>runs/exported</code>).
+                            </li>
                         </ul>
                     </div>
 
@@ -394,7 +398,8 @@
                     <h6>Foto’s toevoegen vanaf smartphone</h6>
                     <ul class="small mb-3">
                         <li>Open op je telefoon <code>/sender</code> op dezelfde server (bijv.
-                            <code>https://&lt;jouw-host&gt;/sender</code>).</li>
+                            <code>https://&lt;jouw-host&gt;/sender</code>).
+                        </li>
                         <li>Maak foto’s – ze verschijnen automatisch hier in de trainer om direct te labelen.</li>
                     </ul>
 
@@ -413,7 +418,8 @@
                         <li><strong>Geen detecties</strong> – Verlaag de drempel (bijv. naar <code>0.2</code>) en test
                             opnieuw. Controleer of je labeltjes (positieve boxen) aanwezig zijn.</li>
                         <li><strong>Overfitting</strong> – Meer variatie/negatieven, schakel augmentatie in, verhoog
-                            <code>weight_decay</code> licht, leg data apart.</li>
+                            <code>weight_decay</code> licht, leg data apart.
+                        </li>
                     </ul>
 
                     <!-- Mini woordenlijst -->

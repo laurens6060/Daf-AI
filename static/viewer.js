@@ -47,6 +47,9 @@
     const applyContourBtn = document.getElementById('applyContourBtn');
     const disableContourBtn = document.getElementById('disableContourBtn');
 
+    const overlay = document.getElementById('overlay');
+    const video = document.getElementById('video');
+
     showMasksInp?.addEventListener('change', () => {
         POSTJSON('/api/config', { show_masks: !!showMasksInp.checked })
             .catch(e => alert('Kon show_masks niet opslaan: ' + e.message));
@@ -196,6 +199,85 @@
 
         return Array.from(vars);
     }
+
+    function flattenMarkers(data = []) {
+        const out = [];
+        for (const m of (Array.isArray(data) ? data : [])) {
+            if (m && Array.isArray(m.items)) {
+                for (const it of m.items) {
+                    out.push({
+                        ...it,
+                        // neem een bruikbaar label mee
+                        label: it.label ?? it.expected_label ?? m.name ?? m.label,
+                    });
+                }
+            } else {
+                out.push(m);
+            }
+        }
+        return out;
+    }
+
+
+    function drawPOIOverlay(markers = [], meta = {}) {
+    console.debug('poi(flat):', markers);
+        const ctx = overlay.getContext('2d');
+
+        // Canvas matcht zichtbare maat van het beeld
+        const rect = video.getBoundingClientRect();
+        overlay.width = Math.max(1, Math.round(rect.width));
+        overlay.height = Math.max(1, Math.round(rect.height));
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+        if (!markers.length) return;
+
+        // Frame-afmetingen komen uit meta (niet uit msg!)
+        const frameW = Number(meta.frameW ?? meta.frame_w ?? meta.w) || overlay.width;
+        const frameH = Number(meta.frameH ?? meta.frame_h ?? meta.h) || overlay.height;
+
+        const scaleX = overlay.width / frameW;
+        const scaleY = overlay.height / frameH;
+
+        // helper om meerdere sleutel-namen te accepteren
+        const val = (obj, ...keys) => {
+            for (const k of keys) if (obj[k] != null) return obj[k];
+            return undefined;
+        };
+
+        markers.forEach(m => {
+            let x = val(m, 'x', 'cx', 'x01');
+            let y = val(m, 'y', 'cy', 'y01');
+            if (x == null || y == null) return;
+
+            let r = val(m, 'r', 'radius', 'radius01');
+            if (r == null) r = 12;
+
+            const looksNormalized = x <= 1 && y <= 1 && r <= 1.5;
+            if (looksNormalized) {
+                x *= frameW;
+                y *= frameH;
+                r *= Math.min(frameW, frameH);
+            }
+
+            const dx = x * scaleX;
+            const dy = y * scaleY;
+            const dr = Math.max(6, r * ((scaleX + scaleY) / 2));
+
+            ctx.beginPath();
+            ctx.arc(dx, dy, dr, 0, Math.PI * 2);
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = (m.ok ?? true) ? '#19a974' : '#e03131';
+            ctx.stroke();
+
+            const labelText = `${val(m, 'found', 'count') ?? 0}/${val(m, 'required', 'req') ?? 1} ${val(m, 'label', 'expected_label') ?? ''}`;
+            ctx.font = '12px system-ui';
+            ctx.fillStyle = (m.ok ?? true) ? '#19a974' : '#e03131';
+            ctx.fillText(labelText, dx + 8, dy - 8);
+        });
+    }
+
+
+
 
     // haal count op uit presentMap met tolerant matching
     function getActualCountFor(name, pmap) {
@@ -466,7 +548,13 @@
             renderPresent(msg.present || []);
             highlightProducts(msg.matched_product_ids ?? []);
             updateAllProductAlerts(msg.matched_product_ids ?? []);
-
+            drawPOIOverlay(
+                flattenMarkers(msg.poi_markers),
+                {
+                    frameW: msg.frame_w ?? msg.frameW ?? msg.w,
+                    frameH: msg.frame_h ?? msg.frameH ?? msg.h
+                }
+            );
 
             if (Array.isArray(msg.contours) && msg.contours.length) {
                 // e.g., show a small list under "In beeld"

@@ -30,7 +30,7 @@ from uuid import uuid4
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Body, UploadFile, File, Form
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Body, UploadFile, File, Form, Query
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -42,6 +42,7 @@ from glob import glob
 import socket
 import webbrowser
 import re
+import math
 
 #from pyueye import ueye
 import sys
@@ -401,6 +402,7 @@ set_active_models([config.model_key])
 # Globale staat voor live video
 # ------------------------------
 latest_frame = None
+latest_raw_frame = None
 latest_detections: List[tuple[str, float]] = []
 ws_clients: List[WebSocket] = []
 
@@ -654,10 +656,11 @@ def cv2_loop():
 #_worker.start()
 
 def infer_loop():
-    global latest_frame, latest_detections, track_states
+    global latest_frame, latest_detections, track_states, latest_raw_frame
 
     while True:
         img = frame_q.get()
+        latest_raw_frame = img.copy()
         now = time.time()
 
         active_objs = get_all_active_model_objs()
@@ -833,13 +836,14 @@ def infer_loop():
         matched_product_ids = set()
         match_regions = []
         templates = _load_contours()
+        poi_markers = []  # [{x:int,y:int, ok:bool, label:str, required:int, found:int}]
+        poi_fail_mismatches = []  # tekstregels voor bestaande reject-flow
 
         try:
             if not getattr(config, "contour_match_enabled", True):
                 templates = []
             else:
                 ids = getattr(config, "active_contour_ids", None)
-                # None = alle; [] = geen; lijst = filter subset
                 if ids is not None:
                     if len(ids) == 0:
                         templates = []
@@ -850,15 +854,12 @@ def infer_loop():
             if templates:
                 h, w = annotated.shape[:2]
                 thr = float(getattr(config, "contour_match_iop", 0.60))
-
-                # (optioneel) geselecteerde templates omlijnen
                 for t in templates:
                     tpl_xy = _denorm_poly(t.get("polygon01", []), w, h)
                     if len(tpl_xy) >= 3:
                         cv2.polylines(annotated, [np.asarray(tpl_xy, np.int32)], True, (255, 255, 0), 2)
 
-                hole_polys = [p for _, polys in (primary_polys + extra_polys) for p in polys if
-                              p is not None and len(p) >= 3]
+                hole_polys = [p for _, polys in (primary_polys + extra_polys) for p in polys if p is not None and len(p) >= 3]
 
                 for t in templates:
                     tpl_xy = _denorm_poly(t.get("polygon01", []), w, h)
@@ -885,6 +886,9 @@ def infer_loop():
                         match_regions.append((rx, ry, rx + rw, ry + rh))
         except Exception as e:
             print(f"[contours] match error: {e}")
+
+
+
 
         # (e) teken nu de boxen; onderdruk tekst wanneer overlapt met match-regio
         if config.show_boxes:
@@ -926,6 +930,58 @@ def infer_loop():
         except Exception as e:
             print(f"[fallback-match] error: {e}")
 
+            # ---- POI ALTIJD DOEN (niet in except) ----
+        def _inside_any_match(x, y, regions):
+            for (x1, y1, x2, y2) in regions:
+                if x1 <= x <= x2 and y1 <= y <= y2:
+                 return True
+            return False
+
+        try:
+            if matched_product_ids:
+                    h, w = annotated.shape[:2]
+                    all_pois = _load_pois()
+                    active_tpl_ids = {t.get("id") for t in templates} if templates else set()
+                    for pid in matched_product_ids:
+                        poi_sets = [
+                            p for p in all_pois
+                            if p.get("product_id") == pid and (
+                                    not p.get("contour_id") or p.get("contour_id") in active_tpl_ids)
+                        ]
+                        for ps in poi_sets:
+                            for it in ps.get("items", []):
+                                x = int(round(float(it.get("x01", 0)) * w))
+                                y = int(round(float(it.get("y01", 0)) * h))
+                                r = int(round(float(it.get("radius01", 0.02)) * min(w, h)))
+                                expected = str(it.get("expected_label", "")).strip().lower()
+                                required = int(it.get("required", 1))
+
+                                if not _inside_any_match(x, y, match_regions):
+                                    poi_markers.append({"x": x, "y": y, "r": r, "ok": False,
+                                                        "label": expected, "required": required, "found": 0})
+                                    poi_fail_mismatches.append(
+                                        f"POI buiten contour: verwacht {required}× {expected} bij ({x},{y})")
+                                    continue
+
+                                found = 0
+                                for kind, (x1, y1, x2, y2), label, conf in box_draw_cmds:
+                                    if label.lower() != expected:
+                                        continue
+                                    cx = (x1 + x2) // 2
+                                    cy = (y1 + y2) // 2
+                                    if math.hypot(cx - x, cy - y) <= r:
+                                        found += 1
+
+                                ok = found >= required
+                                poi_markers.append({"x": x, "y": y, "r": r, "ok": ok,
+                                                    "label": expected, "required": required, "found": found})
+                                if not ok:
+                                    poi_fail_mismatches.append(
+                                        f"POI mist: {found}/{required}× {expected} bij ({x},{y})")
+        except Exception as e:
+            print("[poi] error:", e)
+
+        h, w = annotated.shape[:2]
         latest_frame = annotated
         latest_detections = table_items
 
@@ -935,12 +991,16 @@ def infer_loop():
                 payload = {
                     "type": "detections",
                     "items": items_payload,
-                    "present": present_list
+                    "present": present_list,
+                    "frame_w": w,
+                    "frame_h": h,
                 }
                 if contour_hits:
                     payload["contours"] = contour_hits
                 if matched_product_ids:
                     payload["matched_product_ids"] = list(matched_product_ids)
+                if poi_markers:
+                    payload["poi_markers"] = poi_markers
 
                 asyncio.run_coroutine_threadsafe(broadcast_ws(payload), main_loop)
             except Exception:
@@ -1015,7 +1075,7 @@ async def products_ui(request: Request):
     return templates.TemplateResponse("products.html", {"request": request})
 
 @app.get("/contours", response_class=HTMLResponse)
-async def products_ui(request: Request):
+async def contours_page(request: Request):
     return templates.TemplateResponse("contours.html", {"request": request})
 
 @app.get("/rejects", response_class=HTMLResponse)
@@ -1574,6 +1634,136 @@ async def download_export(path: str):
         return JSONResponse({"error": "Forbidden path"}, status_code=403)
     return FileResponse(str(p), media_type="application/octet-stream", filename=p.name)
 
+def _largest_filled_polygon(img_bgr: np.ndarray, min_area_ratio: float = 0.005) -> list[list[int]]:
+    """
+    Zoek grootste gevulde component i.p.v. randen.
+    Werkt op lastige achtergronden met Otsu + morfologie.
+    """
+    H, W = img_bgr.shape[:2]
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # Otsu threshold (automatisch)
+    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Kies 'foreground' richting (soms wit=achtergrond):
+    if cv2.countNonZero(th) > 0.5 * W * H:
+        th = cv2.bitwise_not(th)
+
+    # Morfologisch sluiten → gaatjes dicht; dan openen → ruis weg
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, k, iterations=2)
+    th = cv2.morphologyEx(th, cv2.MORPH_OPEN,  k, iterations=1)
+
+    cnts, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return []
+
+    cnt = max(cnts, key=cv2.contourArea)
+    area = cv2.contourArea(cnt)
+    if area < min_area_ratio * (W * H):
+        # te klein → waarschijnlijk ruis
+        return []
+
+    peri = cv2.arcLength(cnt, True)
+    approx = cv2.approxPolyDP(cnt, 0.01 * peri, True)  # 1% van de omtrek
+    return [[int(p[0][0]), int(p[0][1])] for p in approx]
+
+
+def _largest_polygon_from_mask(mask_bin: np.ndarray, epsilon_frac: float = 0.01) -> list[list[int]]:
+    # Neem grootste contour van binaire mask en approximeer
+    cnts, _ = cv2.findContours(mask_bin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return []
+    cnt = max(cnts, key=cv2.contourArea)
+    peri = cv2.arcLength(cnt, True)
+    approx = cv2.approxPolyDP(cnt, epsilon_frac * peri, True)
+    return [[int(p[0][0]), int(p[0][1])] for p in approx]
+
+def _auto_contour_from_frame(img: np.ndarray, target_class: Optional[str]) -> tuple[list[list[float]], int, int]:
+    """
+    Retourneer (polygon01, W, H). Probeert eerst seg-masks; anders Canny->largest contour.
+    target_class: None => alle classes toegestaan; anders filter op label.
+    """
+    H, W = img.shape[:2]
+    m = get_primary_model()
+    if m is None:
+        # Fallback: Canny
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        ed = cv2.Canny(gray, 60, 120)
+        poly_px = _largest_polygon_from_mask(ed)
+        poly01 = [[max(0,min(1,x/W)), max(0,min(1,y/H))] for x,y in poly_px]
+        return (poly01, W, H)
+
+    try:
+        res = m.predict(img, conf=max(0.2, config.conf), iou=config.iou, imgsz=config.imgsz, verbose=False)[0]
+    except Exception:
+        res = None
+
+    # 1) als masks beschikbaar: bouw binaire mask per matchende class, kies grootste
+    if res is not None and getattr(res, "masks", None) is not None and res.masks is not None:
+        names = getattr(m, "names", {})
+        best_area = 0
+        best_poly01: list[list[float]] = []
+        for i, poly in enumerate(res.masks.xy or []):
+            if poly is None or len(poly) < 3:
+                continue
+            lab = names.get(int(res.boxes.cls[i].item()), str(int(res.boxes.cls[i].item()))) if isinstance(names, dict) else str(int(res.boxes.cls[i].item()))
+            if target_class and str(lab).lower() != str(target_class).lower():
+                continue
+            # mask vullen om grootste-contour te kunnen approximeren
+            canvas = np.zeros((H, W), np.uint8)
+            pts = np.asarray(poly, np.int32).reshape(-1,1,2)
+            cv2.fillPoly(canvas, [pts], 255)
+            poly_px = _largest_polygon_from_mask(canvas)
+            area = cv2.contourArea(np.asarray(poly_px, np.int32)) if len(poly_px) >= 3 else 0
+            if area > best_area and len(poly_px) >= 3:
+                best_area = area
+                best_poly01 = [[max(0,min(1,x/W)), max(0,min(1,y/H))] for x,y in poly_px]
+        if best_poly01:
+            return (best_poly01, W, H)
+
+    # 2) fallback: Canny grootste contour
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ed = cv2.Canny(gray, 60, 120)
+    poly_px = _largest_filled_polygon(img)
+    poly01 = [[max(0, min(1, x / W)), max(0, min(1, y / H))] for x, y in poly_px]
+    return (poly01, W, H)
+
+from fastapi import UploadFile, File, Form
+
+@app.post("/api/contours/auto")
+async def api_contours_auto(
+    target_class: Optional[str] = Form(None),
+    file: UploadFile | None = File(None)  # ← optioneel
+):
+    # 1) Als er een file is, gebruik die
+    if file is not None:
+        try:
+            content = await file.read()
+        finally:
+            await file.close()
+        nparr = np.frombuffer(content, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return JSONResponse({"error": "Invalid image"}, status_code=400)
+    else:
+        # 2) Anders fallback naar het live raw frame
+        global latest_raw_frame
+        if latest_raw_frame is None:
+            return JSONResponse({"error": "No frame"}, status_code=409)
+        img = latest_raw_frame
+
+    try:
+        poly01, W, H = _auto_contour_from_frame(img, target_class)
+        if len(poly01) < 3:
+            return JSONResponse({"error": "No polygon found"}, status_code=404)
+        return {"ok": True, "width": W, "height": H, "polygon01": poly01}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+
 # ------------------------------
 # Collections + Products JSON storage
 # ------------------------------
@@ -1582,6 +1772,111 @@ DATA_DIR.mkdir(exist_ok=True)
 PRODUCTS_DB = DATA_DIR / "products.json"
 COLLECTIONS_DB = DATA_DIR / "collections.json"
 CONTOURS_DB = DATA_DIR / "contours.json"
+POIS_DB = DATA_DIR / "pois.json"
+ANNS_DB = DATA_DIR / "annotations.json"
+
+def _load_annotations() -> list[dict]:
+    return _load_json(ANNS_DB)
+
+def _save_annotations(items: list[dict]) -> None:
+    _save_json(ANNS_DB, items)
+
+class Box01(BaseModel):
+    x: float
+    y: float
+    w: float
+    h: float
+    label: str
+
+class Point(BaseModel):
+    x: float
+    y: float
+
+class AnnUpsert(BaseModel):
+    key: str
+    name: Optional[str] = None
+    w: int
+    h: int
+    boxes01: List[Box01] = Field(default_factory=list)
+    masks01: List[List[Point]] = Field(default_factory=list)
+
+@app.get("/api/ann")
+async def api_ann_get(key: str):
+    items = _load_annotations()
+    for it in items:
+        if it.get("key") == key:
+            return it
+    return JSONResponse({"error": "Not found"}, status_code=404)
+
+@app.post("/api/ann")
+async def api_ann_upsert(payload: AnnUpsert):
+    items = _load_annotations()
+    found = False
+    for i, it in enumerate(items):
+        if it.get("key") == payload.key:
+            items[i] = { **it, **payload.model_dump() }
+            found = True
+            break
+    if not found:
+        items.append(payload.model_dump())
+    _save_annotations(items)
+    return {"ok": True}
+
+
+def _load_pois() -> list[dict]: return _load_json(POIS_DB)
+def _save_pois(items: list[dict]): _save_json(POIS_DB, items)
+
+class POIItem(BaseModel):
+    x01: float
+    y01: float
+    z: Optional[float] = None
+    expected_label: str
+    required: int = 1
+    radius01: float = 0.02  # ~2% van min(W,H)
+
+class POISet(BaseModel):
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    name: str
+    product_id: Optional[str] = None      # POI’s horen doorgaans bij product
+    contour_id: Optional[str] = None      # optioneel: alleen geldig binnen deze contour
+    items: List[POIItem] = Field(default_factory=list)
+
+@app.get("/api/pois")
+async def api_pois_list(product_id: Optional[str] = None, contour_id: Optional[str] = None):
+    items = _load_pois()
+    if product_id:
+        items = [it for it in items if it.get("product_id") == product_id]
+    if contour_id:
+        items = [it for it in items if it.get("contour_id") == contour_id]
+    return items
+
+@app.post("/api/pois")
+async def api_pois_create(p: POISet):
+    items = _load_pois()
+    items.append(p.model_dump())
+    _save_pois(items)
+    return p
+
+@app.put("/api/pois/{pid}")
+async def api_pois_update(pid: str, payload: dict):
+    items = _load_pois()
+    for i, it in enumerate(items):
+        if it.get("id") == pid:
+            allowed = {"name","product_id","contour_id","items"}
+            it.update({k:v for k,v in payload.items() if k in allowed})
+            items[i] = it
+            _save_pois(items)
+            return it
+    return JSONResponse({"error":"Not found"}, status_code=404)
+
+@app.delete("/api/pois/{pid}")
+async def api_pois_delete(pid: str):
+    items = _load_pois()
+    new = [it for it in items if it.get("id") != pid]
+    if len(new) == len(items):
+        return JSONResponse({"error":"Not found"}, status_code=404)
+    _save_pois(new)
+    return {"ok": True, "deleted": pid}
 
 def _load_contours() -> list[dict]:
     return _load_json(CONTOURS_DB)
@@ -1829,6 +2124,7 @@ class Contour(BaseModel):
     name: str                      # e.g. "Type 1"
     type_key: str                  # machine label you’ll map to product type (e.g. "type1")
     image_name: Optional[str] = None  # original reference filename (optional)
+    image_url: Optional[str] = None
     width: int
     height: int
     polygon01: List[List[float]]   # normalized [[x,y]...]
@@ -1864,13 +2160,14 @@ async def create_contour(c: Contour):
     _save_contours(items)
     return c
 
-@app.put("/contours/{cid}")
+@app.put("/api/contours/{cid}")
 async def update_contour(cid: str, payload: dict):
     items = _load_contours()
     for i, it in enumerate(items):
         if it.get("id") == cid:
             it.update({k: v for k, v in payload.items()
-                       if k in ("name","type_key","polygon01","width","height","image_name","product_id")})  # <—
+                       if k in ("name","type_key","polygon01","width","height",
+                                "image_name","image_url","product_id")})
             items[i] = it
             _save_contours(items)
             return it
