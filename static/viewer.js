@@ -50,6 +50,52 @@
     const overlay = document.getElementById('overlay');
     const video = document.getElementById('video');
 
+    const captureBtn = document.getElementById('captureBtn');
+    const captureStatus = document.getElementById('captureStatus');
+    const photoRadios = document.querySelectorAll('input[name="photoMode"]');
+
+    let autoPhotoMode = false;
+    let lastAutoCapture = 0;
+    const AUTO_CAPTURE_INTERVAL_MS = 4000; // minstens 4s tussen foto's
+
+    photoRadios.forEach(r => {
+        r.addEventListener('change', () => {
+            autoPhotoMode = (document.getElementById('photoAuto').checked);
+            captureStatus.textContent = autoPhotoMode
+                ? 'Automatische modus actief: foto wordt genomen bij centrering.'
+                : 'Handmatige modus.';
+        });
+    });
+
+    async function takePhoto() {
+        try {
+            captureStatus.textContent = 'Bezig met foto-opname...';
+            // Overlay tijdelijk verbergen
+            overlay.style.display = 'none';
+            const resp = await fetch('/api/capture', { method: 'POST' });
+            overlay.style.display = ''; // overlay terug tonen
+
+            if (!resp.ok) throw new Error(await resp.text());
+            const data = await resp.json().catch(() => ({}));
+            captureStatus.textContent = data?.path
+                ? `Foto opgeslagen: ${data.path}`
+                : 'Foto genomen.';
+        } catch (e) {
+            captureStatus.textContent = 'Fout bij foto-opname: ' + e.message;
+        }
+    }
+
+    captureBtn?.addEventListener('click', takePhoto);
+
+
+    const productMatchBoxId = 'productMatchBox';
+    let stableCenterStart = null;
+    let lastCenteredProductId = null;
+    const CENTER_TOLERANCE = 0.2;   // 20% marge van scherm
+    const STABILITY_MS = 400;       // 0.4 seconde stabiel vereist
+
+
+
     showMasksInp?.addEventListener('change', () => {
         POSTJSON('/api/config', { show_masks: !!showMasksInp.checked })
             .catch(e => alert('Kon show_masks niet opslaan: ' + e.message));
@@ -81,6 +127,63 @@
 
 
     // ===== Kleine helpers =====
+
+    function productNameById(pid) {
+        const p = (products || []).find(x => String(x.id) === String(pid));
+        return p ? String(p.name || '') : null;
+    }
+
+    /**
+     * Controleer of de herkende contour of product in het midden van het beeld ligt.
+     * msg moet frame_w/h + eventueel cx/cy bevatten.
+     */
+    function isCentered(msg) {
+        if (!msg || typeof msg.frame_w !== 'number' || typeof msg.frame_h !== 'number') return false;
+        const cx = Number(msg.cx ?? msg.center_x ?? msg.contour_cx ?? msg.frame_w / 2);
+        const cy = Number(msg.cy ?? msg.center_y ?? msg.contour_cy ?? msg.frame_h / 2);
+        const tolX = msg.frame_w * CENTER_TOLERANCE;
+        const tolY = msg.frame_h * CENTER_TOLERANCE;
+        const centerX = msg.frame_w / 2;
+        const centerY = msg.frame_h / 2;
+        return Math.abs(cx - centerX) <= tolX && Math.abs(cy - centerY) <= tolY;
+    }
+
+
+    /**
+     * Toon de best/herkende productnaam (1e uit matched_product_ids) als badge
+     * onder de stickyBox (“In beeld”).
+     */
+    function renderTopMatchedProduct(matchedIds, statusText) {
+        if (!stickyBox) return;
+        let box = document.getElementById(productMatchBoxId);
+        if (!box) {
+            box = document.createElement('div');
+            box.id = productMatchBoxId;
+            box.className = 'mt-2';
+            stickyBox.insertAdjacentElement('beforeend', box);
+        }
+
+        if (statusText) {
+            box.innerHTML = `<div class="small text-muted">${esc(statusText)}</div>`;
+            return;
+        }
+
+        const arr = Array.isArray(matchedIds) ? matchedIds.map(String) : [];
+        if (!arr.length) {
+            box.innerHTML = '';
+            return;
+        }
+
+        const topId = arr[0];
+        const topName = productNameById(topId) || topId;
+
+        box.innerHTML = `
+      <div class="small text-muted">Herkenning (gecentreerd):</div>
+      <span class="badge text-bg-success">${esc(topName)}</span>
+    `;
+    }
+
+
 
     /**
      * Koppelt een <input type="range"> aan een label element en houdt
@@ -220,7 +323,7 @@
 
 
     function drawPOIOverlay(markers = [], meta = {}) {
-    console.debug('poi(flat):', markers);
+        console.debug('poi(flat):', markers);
         const ctx = overlay.getContext('2d');
 
         // Canvas matcht zichtbare maat van het beeld
@@ -546,8 +649,50 @@
         if (msg.type === "detections") {
             renderDetections(msg.items || []);
             renderPresent(msg.present || []);
-            highlightProducts(msg.matched_product_ids ?? []);
-            updateAllProductAlerts(msg.matched_product_ids ?? []);
+            // Controleer of het beeld gecentreerd is en stabiel blijft
+            const centered = isCentered(msg);
+
+            if (Array.isArray(msg.matched_product_ids) && msg.matched_product_ids.length) {
+                const pid = String(msg.matched_product_ids[0]);
+                if (centered) {
+                    if (autoPhotoMode && centered && elapsed >= STABILITY_MS) {
+                        const now = Date.now();
+                        if (now - lastAutoCapture > AUTO_CAPTURE_INTERVAL_MS) {
+                            lastAutoCapture = now;
+                            takePhoto();
+                        }
+                    }
+
+                    if (lastCenteredProductId === pid) {
+                        // al even gecentreerd → check timer
+                        if (!stableCenterStart) stableCenterStart = Date.now();
+                        const elapsed = Date.now() - stableCenterStart;
+                        if (elapsed >= STABILITY_MS) {
+                            // stabiel en gecentreerd → pas echt highlighten & keuren
+                            highlightProducts(msg.matched_product_ids);
+                            updateAllProductAlerts(msg.matched_product_ids);
+                            renderTopMatchedProduct(msg.matched_product_ids);
+                        } else {
+                            renderTopMatchedProduct([], 'centreren…');
+                        }
+                    } else {
+                        // nieuw product → reset timer
+                        lastCenteredProductId = pid;
+                        stableCenterStart = Date.now();
+                        renderTopMatchedProduct([], 'centreren…');
+                    }
+                } else {
+                    // niet gecentreerd → reset
+                    stableCenterStart = null;
+                    renderTopMatchedProduct([], 'plaats product in midden…');
+                }
+            } else {
+                // geen match
+                stableCenterStart = null;
+                renderTopMatchedProduct([], '');
+            }
+
+
             drawPOIOverlay(
                 flattenMarkers(msg.poi_markers),
                 {
@@ -557,7 +702,6 @@
             );
 
             if (Array.isArray(msg.contours) && msg.contours.length) {
-                // e.g., show a small list under "In beeld"
                 const box = document.getElementById("stickyBox");
                 const div = document.createElement('div');
                 div.className = 'mt-2';
@@ -567,6 +711,7 @@
             }
             return;
         }
+
     };
 
     function highlightProducts(ids) {

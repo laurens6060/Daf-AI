@@ -56,6 +56,37 @@
             text-decoration-color: red;
             text-decoration-thickness: 3px
         }
+
+        .image-card {
+            width: min(900px, 100%);
+            margin: 0 auto;
+        }
+
+        .canvas-wrap {
+            position: relative;
+        }
+
+        .canvas-wrap img,
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        .carousel-control-prev-icon,
+        .carousel-control-next-icon {
+            filter: invert(45%) sepia(100%) saturate(500%) hue-rotate(190deg) brightness(100%) contrast(90%);
+        }
+
+        .image-card .match-badge {
+            position: absolute;
+            top: .5rem;
+            right: .5rem;
+        }
+
+        .image-card {
+            position: relative;
+        }
     </style>
 </head>
 
@@ -263,9 +294,22 @@
                 </div>
             </aside>
 
-            <!-- Images -->
             <section class="col-12 col-xl-9 order-2">
-                <div id="thumbs" class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xxl-4 g-4"></div>
+                <div id="trainerCarousel" class="carousel slide" data-bs-interval="false">
+                    <div class="carousel-indicators" id="carouselIndicators"></div>
+                    <div class="carousel-inner" id="carouselInner"></div>
+
+                    <button class="carousel-control-prev" type="button" data-bs-target="#trainerCarousel"
+                        data-bs-slide="prev">
+                        <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                        <span class="visually-hidden">Vorige</span>
+                    </button>
+                    <button class="carousel-control-next" type="button" data-bs-target="#trainerCarousel"
+                        data-bs-slide="next">
+                        <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                        <span class="visually-hidden">Volgende</span>
+                    </button>
+                </div>
             </section>
         </div>
     </main>
