@@ -545,6 +545,24 @@
                         </div>
                     </div>
 
+                    <div class="card mt-3">
+                        <div class="card-header">Foto's</div>
+                        <div class="card-body">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="photoMode" id="photoManual"
+                                    value="manual" checked>
+                                <label class="form-check-label" for="photoManual">Handmatig</label>
+                            </div>
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="radio" name="photoMode" id="photoAuto"
+                                    value="auto">
+                                <label class="form-check-label" for="photoAuto">Automatisch bij centrering</label>
+                            </div>
+                            <button id="captureBtn" class="btn btn-primary w-100">Foto nemen</button>
+                            <div id="captureStatus" class="small mt-2 text-muted"></div>
+                        </div>
+                    </div>
+
                 </div>
             </section>
 

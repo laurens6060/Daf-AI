@@ -44,7 +44,12 @@ import webbrowser
 import re
 import math
 
-#from pyueye import ueye
+import cv2 as cv
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from functools import lru_cache
+from typing import Dict, Tuple, List, Optional
+
+# from pyueye import ueye
 import sys
 
 # ------------------------------
@@ -88,18 +93,14 @@ def _open_browser_soon(url: str, delay: float = 1.5):
 #     pitch = ueye.INT()
 #     bytes_per_pixel = 0
 #
-#     #Variables
-#     hCam = ueye.HIDS(0)             #0: first available camera
+#     # Variables
+#     hCam = ueye.HIDS(0)             # 0: first available camera
 #     sInfo = ueye.SENSORINFO()
 #     cInfo = ueye.CAMINFO()
-#     #pcImageMemory = ueye.c_mem_p()
 #     MemID = ueye.int()
 #     rectAOI = ueye.IS_RECT()
-#     #pitch = ueye.INT()
-#     #nBitsPerPixel = ueye.INT(24)    #24: bits per pixel for color mode; take 8 bits per pixel for monochrome
-#     channels = 3                    #3: channels for color mode(RGB); take 1 channel for monochrome
-#     m_nColorMode = ueye.INT()		# Y8/RGB16/RGB24/REG32
-#     #bytes_per_pixel = int(nBitsPerPixel / 8)
+#     channels = 3                    # 3: channels for color mode(RGB); take 1 channel for monochrome
+#     m_nColorMode = ueye.INT()       # Y8/RGB16/RGB24/REG32
 #
 #     # Starts the driver and establishes the connection to the camera
 #     nRet = ueye.is_InitCamera(hCam, None)
@@ -113,7 +114,7 @@ def _open_browser_soon(url: str, delay: float = 1.5):
 #     nRet = ueye.is_GetSensorInfo(hCam, sInfo)
 #     if nRet != ueye.IS_SUCCESS:
 #         print("is_GetSensorInfo ERROR")
-#     nRet = ueye.is_ResetToDefault( hCam)
+#     nRet = ueye.is_ResetToDefault(hCam)
 #     if nRet != ueye.IS_SUCCESS:
 #         print("is_ResetToDefault ERROR")
 #
@@ -168,8 +169,8 @@ def _open_browser_soon(url: str, delay: float = 1.5):
 #     print("Maximum image height:\t", ueye_height)
 #     print()
 #     # TODO Downscale
-#     #ueye_width = ueye.c_int(int(ueye_width/4))
-#     #ueye_height = ueye.c_int(int(ueye_height/4))
+#     # ueye_width = ueye.c_int(int(ueye_width/4))
+#     # ueye_height = ueye.c_int(int(ueye_height/4))
 #     print(type(ueye_width))
 #     print(type(ueye_height))
 #
@@ -186,7 +187,6 @@ def _open_browser_soon(url: str, delay: float = 1.5):
 #             # Set the desired color mode
 #             nRet = ueye.is_SetColorMode(hCam, m_nColorMode)
 #
-#
 #     # Activates the camera's live video mode (free run mode)
 #     nRet = ueye.is_CaptureVideo(hCam, ueye.IS_DONT_WAIT)
 #     if nRet != ueye.IS_SUCCESS:
@@ -198,29 +198,6 @@ def _open_browser_soon(url: str, delay: float = 1.5):
 #         print("is_InquireImageMem ERROR")
 #     else:
 #         print("ueye init complete")
-
-
-
-
-# ------------------------------
-# Tijdelijk oplossing om screenshots te maken, zal niet gebruikt worden in productie
-# ------------------------------
-SNAP_DIR = Path("snapshots")
-SNAP_DIR.mkdir(parents=True, exist_ok=True)
-SNAPSHOT_MIN_INTERVAL = 2.0  # seconds between saves
-_last_snap_ts = 0.0
-_was_present = False
-
-def _save_detection_snapshot(annotated: np.ndarray, items: list[tuple[str, float]]):
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    top = max(items, key=lambda t: t[1], default=("det", 0.0))
-    label, conf = top[0], top[1]
-    fname = f"{ts}_{label}_{int(conf*100)}.jpg"
-    fpath = SNAP_DIR / fname
-    try:
-        cv2.imwrite(str(fpath), annotated)
-    except Exception as e:
-        print(f"[snapshot] failed to save {fpath}: {e}")
 
 # ------------------------------
 # Defaults / tunables
@@ -234,6 +211,35 @@ MJPEG_QUALITY = 70
 DEFAULT_HOLD_MS   = 500
 DEFAULT_MIN_HITS  = 2
 DEFAULT_EMA_ALPHA = 0.4
+
+_last_auto_ref_match_ts = 0.0
+AUTO_REF_MATCH_INTERVAL = 0.5  # seconden; pas aan naar smaak
+
+CENTER_BOX_FRAC_W = 0.40   # centrale venster: 40% van beeldbreedte
+CENTER_BOX_FRAC_H = 0.40   # centrale venster: 40% van beeldhoogte
+CENTER_MIN_FRAMES = 8      # minimaal aantal opeenvolgende frames "in het midden" voor goed-/afkeuren
+BORDER_MARGIN_PX  = 8      # cirkel mag niet (bijna) uit beeld steken
+
+_center_gate_state = {
+    "last_pid": None,      # laatst gedetecteerde product-id (auto type)
+    "stable": 0,           # aaneengesloten frames dat het centrum OK is
+}
+def _is_centered(cx: float, cy: float, r: float, w: int, h: int) -> bool:
+    """Ligt de naaf binnen het centrale venster én niet tegen de rand?"""
+    cw, ch = int(w * CENTER_BOX_FRAC_W), int(h * CENTER_BOX_FRAC_H)
+    x1 = (w - cw) // 2
+    y1 = (h - ch) // 2
+    x2 = x1 + cw
+    y2 = y1 + ch
+
+    inside_center_box = (x1 <= cx <= x2) and (y1 <= cy <= y2)
+    safe_in_frame = (
+        (cx - r) >= BORDER_MARGIN_PX and
+        (cy - r) >= BORDER_MARGIN_PX and
+        (cx + r) <= (w - BORDER_MARGIN_PX) and
+        (cy + r) <= (h - BORDER_MARGIN_PX)
+    )
+    return inside_center_box and safe_in_frame
 
 TRACKER_CFG = "bytetrack.yaml"
 if not Path(TRACKER_CFG).exists():
@@ -652,8 +658,8 @@ def cv2_loop():
     #         pass
 
 
-#_worker = threading.Thread(target=cv2_loop, daemon=True)
-#_worker.start()
+_worker = threading.Thread(target=cv2_loop, daemon=True)
+_worker.start()
 
 def infer_loop():
     global latest_frame, latest_detections, track_states, latest_raw_frame
@@ -662,6 +668,11 @@ def infer_loop():
         img = frame_q.get()
         latest_raw_frame = img.copy()
         now = time.time()
+        update_last_frame(img)
+        pid = None
+        centered_ok = False
+        stable_now = 0
+        match_flag = False
 
         active_objs = get_all_active_model_objs()
         if not active_objs:
@@ -887,8 +898,140 @@ def infer_loop():
         except Exception as e:
             print(f"[contours] match error: {e}")
 
+        # (d2) AUTOMATISCHE TYPE-HERKENNING m.b.v. ref_contours (T8/T9/T13) -> product match
+        try:
+            global _last_auto_ref_match_ts, _center_gate_state
+            now = time.time()
+            if (now - _last_auto_ref_match_ts) >= AUTO_REF_MATCH_INTERVAL:
+                _last_auto_ref_match_ts = now
 
+                gray_live = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
+                # live contour + signatures + centrum/straal
+                cnt_live = _find_outer_contour_detailed(gray_live, debug_name=None)
+                (cx, cy, r), live_sigs = _live_features(gray_live, cnt_live)
+
+                # doorloop beste kandidaat per type (zoals in /api/contour-match)
+                type_keys = _list_ref_type_keys()
+                best = None
+                second = None
+
+                for tkey in type_keys:
+                    cands = _iter_ref_files(tkey)
+                    best_for_type = None
+                    for ref_path in cands:
+                        try:
+                            ref_feats = _load_ref_features(str(ref_path))
+                        except Exception:
+                            continue
+
+                        cnt_ref = ref_feats["cnt"]
+                        score, ncc, s_shape = _combined_score(cnt_ref, cnt_live, ref_feats, live_sigs)
+                        ref_mask, live_mask = _align_for_overlap(cnt_ref, cnt_live, out_size=768)
+                        iou = _compute_overlap(ref_mask, live_mask)
+
+                        rec = {
+                            "type_key": tkey,
+                            "ref_file": ref_path.name,
+                            "score": float(score),
+                            "ncc": float(ncc),
+                            "shape": float(s_shape),
+                            "iou": float(iou),
+                        }
+                        if (best_for_type is None) or (rec["score"] < best_for_type["score"]):
+                            best_for_type = rec
+
+                    if best_for_type:
+                        if (best is None) or (best_for_type["score"] < best["score"]):
+                            second = best
+                            best = best_for_type
+                        elif (second is None) or (best_for_type["score"] < second["score"]):
+                            second = best_for_type
+
+                # drempels (gelijk aan endpoint-logica, evt. tunen)
+                if best is not None:
+                    SCORE_MAX = 0.02  # zelfde default als endpoint-Form
+                    NCC_MIN = 0.70
+                    IOU_MIN = 0.60
+                    MARGIN = 0.18
+
+                    ok_by_thresh = (best["score"] <= SCORE_MAX) and (best["ncc"] >= NCC_MIN) and (
+                                best["iou"] >= IOU_MIN)
+                    ok_by_iou = best.get("iou", 0.0) >= IOU_MIN
+                    ok_by_margin = True
+                    if second:
+                        rel = (second["score"] - best["score"]) / max(second["score"], 1e-6)
+                        ok_by_margin = (rel >= MARGIN)
+
+                    match_flag = bool(
+                        (ok_by_thresh)
+                        or (best.get("iou", 0.0) >= 0.90 and best["score"] <= 0.40)
+                        or (ok_by_margin and best.get("ncc", 0.0) >= 0.65)
+                    )
+
+                    # ===== Nieuw: center-gate (alleen bij succesvolle auto-type match) =====
+                    H, W = annotated.shape[:2]
+                    pid = None
+                    centered_ok = False
+                    stable_now = 0
+
+                    if match_flag:
+                        # map type -> product-id op NAAM (met fallback)
+                        pid = _product_id_by_type_key(best["type_key"], best.get("ref_file"))
+
+                        # check centreren
+                        centered_ok = _is_centered(float(cx), float(cy), float(r), W, H)
+
+                        # state per product vasthouden
+                        if pid != _center_gate_state.get("last_pid"):
+                            _center_gate_state["last_pid"] = pid
+                            _center_gate_state["stable"] = 0
+
+                        if centered_ok and pid:
+                            _center_gate_state["stable"] = int(_center_gate_state.get("stable", 0)) + 1
+                        else:
+                            # kies hier zelf: reset hard, of laat langzaam afbouwen
+                            _center_gate_state["stable"] = 0
+
+                        stable_now = _center_gate_state["stable"]
+
+                        # 1) informatieve rij (zoals contour_hits uit handmatige templates)
+                        contour_hits.append({
+                            "type_key": best["type_key"],
+                            "iop": round(best.get("iou", 0.0), 3),
+                            "ref": best.get("ref_file", ""),
+                            "centered": bool(centered_ok),
+                            "stable": int(stable_now),
+                            "need": int(CENTER_MIN_FRAMES),
+                        })
+
+                        # 2) markeer pas als 'gematcht' (en dus klaar voor keuring)
+                        #    wanneer genoeg frames stabiel in het midden
+                        if pid and stable_now >= CENTER_MIN_FRAMES:
+                            matched_product_ids.add(pid)
+
+                        # 3) visuele hints (rechthoek + status)
+                        #    teken het centrale venster
+                        cw, ch = int(W * CENTER_BOX_FRAC_W), int(H * CENTER_BOX_FRAC_H)
+                        x1 = (W - cw) // 2;
+                        y1 = (H - ch) // 2
+                        x2 = x1 + cw;
+                        y2 = y1 + ch
+                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (80, 160, 255), 2)
+
+                        color = (0, 220, 0) if (pid and stable_now >= CENTER_MIN_FRAMES) else (
+                            (0, 200, 255) if centered_ok else (0, 180, 255))
+                        msg = f"type {best['type_key']} (auto)  "
+                        msg += f"[center {'OK' if centered_ok else '…'}: {stable_now}/{CENTER_MIN_FRAMES}]"
+                        if pid and stable_now >= CENTER_MIN_FRAMES:
+                            msg += "  — READY"
+                        cv2.putText(
+                            annotated, msg, (10, 28),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2
+                        )
+
+        except Exception as e:
+            print("[auto ref type] error:", e)
 
         # (e) teken nu de boxen; onderdruk tekst wanneer overlapt met match-regio
         if config.show_boxes:
@@ -900,20 +1043,6 @@ def infer_loop():
                 if not suppress:
                     cv2.putText(annotated, f"{label} {conf * 100:.0f}%",
                                 (x1, max(0, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-        # 5) snapshot (optional)
-        try:
-            primary_keys = get_active_models()
-            primary_key = primary_keys[0] if primary_keys else ""
-            using_schijfrem = "schijfrem_yolo8n.pt" in os.path.basename(str(primary_key))
-            global _was_present, _last_snap_ts
-            present_now = bool(table_items)
-            if using_schijfrem and present_now and not _was_present:
-                _save_detection_snapshot(img, table_items)
-                _last_snap_ts = now
-            _was_present = present_now
-        except Exception as e:
-            print(f"[snapshot] error: {e}")
 
         # 6) compute present
         present = Counter(active_labels)
@@ -994,7 +1123,13 @@ def infer_loop():
                     "present": present_list,
                     "frame_w": w,
                     "frame_h": h,
+                    "pid": pid,
+                    "centered": bool(centered_ok),
+                    "stable": int(stable_now),
+                    "need": int(CENTER_MIN_FRAMES),
+                    "box_frac": [CENTER_BOX_FRAC_W, CENTER_BOX_FRAC_H],
                 }
+
                 if contour_hits:
                     payload["contours"] = contour_hits
                 if matched_product_ids:
@@ -1641,7 +1776,7 @@ def _largest_filled_polygon(img_bgr: np.ndarray, min_area_ratio: float = 0.005) 
     """
     H, W = img_bgr.shape[:2]
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
     # Otsu threshold (automatisch)
     _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -1762,8 +1897,665 @@ async def api_contours_auto(
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+router = APIRouter()
+
+# --- Type -> product mapping helper (gebruik properties.type_key of properties.type) ---
+def _product_id_by_type_key(type_key: str, ref_file: str | None = None) -> Optional[str]:
+    """
+    Zoek het product-ID op basis van 'name' in products.json.
+    - Case-insensitive
+    - Negeert underscores
+    - Probeert eerst type_key, dan ref_file-stem (zonder extensie)
+    - Laat lichte variaties toe (zoals '9T9', 'T9_dark', 'T13v2')
+    """
+    def _normalize(s: str) -> str:
+        return str(s).strip().lower().replace("_", "").replace("-", "")
+
+    key = _normalize(type_key)
+    alt = _normalize(Path(ref_file).stem if ref_file else "")
+    if not key and not alt:
+        return None
+
+    best_match = None
+    for p in _load_products():
+        pname = _normalize(p.get("name", ""))
+        if not pname:
+            continue
+
+        # --- Exact match ---
+        if pname == key or pname == alt:
+            return p.get("id")
+
+        # --- Deelstring match (T9 <-> T9dark, 9T9 <-> T9, T13v2 <-> T13) ---
+        if pname in key or key in pname or pname in alt or alt in pname:
+            best_match = p.get("id")
+
+        # --- Fuzzy letter/cijfer fallback (negeert 't') ---
+        elif pname.replace("t", "") == key.replace("t", "") or pname.replace("t", "") == alt.replace("t", ""):
+            best_match = p.get("id")
+
+    return best_match
 
 
+# ===[ Multi-ref helpers voor contour-match ]=================================
+REF_DIR = Path("./ref_contours")
+REF_OK_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+
+def _ref_type_prefix_from_stem(stem: str) -> str:
+    """
+    Neem een type-prefix uit een bestandsnaam-stem: 'T9_02' -> 'T9', 'T13dark' -> 'T13'.
+    Valt terug op de volledige stem als er geen duidelijke scheiding is.
+    """
+    m = re.match(r"([A-Za-z0-9]+)", stem)
+    return m.group(1) if m else stem
+
+def _iter_ref_files(prefix: str | None = None) -> list[Path]:
+    """
+    Vind alle referentiefoto's in ./ref_contours.
+    - Als prefix opgegeven is, filter op die prefix (case-insensitive).
+    - Anders: alle bestanden.
+    """
+    if not REF_DIR.exists():
+        return []
+    files = [p for p in REF_DIR.iterdir()
+             if p.is_file() and p.suffix.lower() in REF_OK_SUFFIXES]
+    if prefix:
+        px = prefix.lower()
+        files = [p for p in files if _ref_type_prefix_from_stem(p.stem).lower() == px]
+    # deterministische volgorde
+    files.sort(key=lambda p: p.name.lower())
+    return files
+
+def _list_ref_type_keys() -> list[str]:
+    """Unieke type-prefixes die in ref_contours voorkomen, gesorteerd."""
+    keys = set()
+    for p in _iter_ref_files():
+        keys.add(_ref_type_prefix_from_stem(p.stem))
+    return sorted(keys)
+
+def _load_ref_contour_from_file(path: Path) -> np.ndarray | None:
+    ref = cv.imread(str(path), cv.IMREAD_GRAYSCALE)
+    if ref is None:
+        return None
+    try:
+        cnt = _find_outer_contour_detailed(ref)
+    except Exception:
+        cnt = None
+    return cnt
+
+def _find_hole_contour(gray: np.ndarray, roi=None):
+    return _find_outer_contour_detailed(gray)
+
+# ---------- Helpers ----------
+def _read_image(file_bytes: bytes) -> np.ndarray:
+    img = cv.imdecode(np.frombuffer(file_bytes, np.uint8), cv.IMREAD_GRAYSCALE)
+    if img is None:
+        raise ValueError("Kon afbeelding niet decoderen")
+    return img
+
+def simplify(c, frac=0.005):
+    peri = cv.arcLength(c, True)
+    return cv.approxPolyDP(c, max(1.0, frac*peri), True)
+
+def _draw_cnt(img_gray, cnt, name):
+    vis = cv.cvtColor(img_gray, cv.COLOR_GRAY2BGR)
+    cv.drawContours(vis, [cnt], -1, (0,255,0), 2)
+    cv.imwrite(f"debug/{name}.png", vis)
+
+def _mask_from_contours(contours: list[np.ndarray], size: tuple[int, int]) -> np.ndarray:
+    m = np.zeros(size, np.uint8)
+    if contours:
+        cv.drawContours(m, contours, -1, 255, thickness=-1)
+    return m
+
+def _draw_debug_contour(img_gray: np.ndarray, cnt, name: str):
+    vis = cv.cvtColor(img_gray, cv.COLOR_GRAY2BGR)
+    if isinstance(cnt, (list, tuple)):
+        cv.drawContours(vis, cnt, -1, (0, 255, 0), 1, lineType=cv.LINE_AA)
+    else:
+        cv.drawContours(vis, [cnt], -1, (0, 255, 0), 1, lineType=cv.LINE_AA)
+    os.makedirs("debug_contours", exist_ok=True)
+    cv.imwrite(os.path.join("debug_contours", f"{name}.png"), vis)
+
+def _center_from_contour(cnt: np.ndarray) -> tuple[float,float,float]:
+    # center+radius van buitenrand
+    (cx, cy), r = cv.minEnclosingCircle(cnt.astype(np.float32))
+    return float(cx), float(cy), float(r)
+
+def _annulus_polar(gray: np.ndarray, cx: float, cy: float,
+                   r1: float, r2: float,
+                   thetas: int = 720, min_rows: int = 32) -> np.ndarray:
+    """
+    Unwrap annulus [r1, r2] naar een (rows, cols) beeld in polaire coördinaten.
+    rows ≈ r2; daarna exact de band r1..r2 uitsnijden.
+    """
+    H = max(1, int(np.ceil(r2)) + 1)  # resolutie over radius-as
+    polar = cv.warpPolar(
+        gray, (thetas, H),
+        (cx, cy), r2,
+        cv.WARP_POLAR_LINEAR | cv.WARP_FILL_OUTLIERS
+    )
+    y1 = int(max(0, np.floor(r1)))
+    y2 = int(min(H, np.ceil(r2)))
+    band = polar[y1:y2, :]  # (rows, thetas)
+
+    if band.shape[0] < min_rows:
+        band = cv.resize(band, (thetas, max(min_rows, 1)), interpolation=cv.INTER_LINEAR)
+    return band
+
+
+
+def _theta_signature(polar_band: np.ndarray) -> np.ndarray:
+    sig = polar_band.mean(axis=0).astype(np.float32)
+    sig -= sig.mean()
+    n = float(np.linalg.norm(sig) + 1e-6)
+    return sig / n
+
+def _ncc_circular(a: np.ndarray, b: np.ndarray) -> float:
+    """Max. circulaire correlatie in [-1,1]; a/b zijn zero-mean en unit-norm."""
+    a = np.asarray(a, np.float32); b = np.asarray(b, np.float32)
+    n = int(a.size)
+    A = np.fft.rfft(a); B = np.fft.rfft(b)
+    xcorr = np.fft.irfft(A * np.conj(B), n=n)  # géén extra /n hier
+    val = float(np.max(xcorr))
+    return max(-1.0, min(1.0, val))
+
+
+
+@lru_cache(maxsize=128)
+def _load_ref_features(path_str: str):
+    path = Path(path_str)
+    img = cv.imread(str(path), cv.IMREAD_GRAYSCALE)
+    if img is None:
+        raise FileNotFoundError(path)
+
+    cnts = _find_outer_contour_detailed(img)
+    cnt = cnts[0] if isinstance(cnts, list) else cnts
+    cx, cy, r = _center_from_contour(cnt)
+
+    A = _theta_signature(_annulus_polar(img, cx, cy, 0.75*r, 0.95*r, thetas=1440, min_rows=64))
+    B = _theta_signature(_annulus_polar(img, cx, cy, 0.50*r, 0.70*r, thetas=1440, min_rows=64))
+    C = _theta_signature(_annulus_polar(img, cx, cy, 0.30*r, 0.45*r, thetas=1440, min_rows=64))
+
+    return {"cnt": cnt, "center": (cx, cy, r), "sigA": A, "sigB": B, "sigC": C}
+
+def _live_features(gray: np.ndarray, cnt_live: np.ndarray):
+    cx, cy, r = _center_from_contour(cnt_live)
+    A = _theta_signature(_annulus_polar(gray, cx, cy, 0.75*r, 0.95*r, thetas=1440, min_rows=64))
+    B = _theta_signature(_annulus_polar(gray, cx, cy, 0.50*r, 0.70*r, thetas=1440, min_rows=64))
+    C = _theta_signature(_annulus_polar(gray, cx, cy, 0.30*r, 0.45*r, thetas=1440, min_rows=64))
+    return (cx, cy, r), (A, B, C)
+
+
+def _combined_score(cnt_ref, cnt_live, ref_feats, live_sigs,
+                    w_shape=0.2, w_polar=0.8):
+    s_shape = cv.matchShapes(cnt_ref, cnt_live, cv.CONTOURS_MATCH_I1, 0.0)
+
+    A_ref, B_ref, C_ref = ref_feats["sigA"], ref_feats["sigB"], ref_feats["sigC"]
+    A, B, C = live_sigs
+    nccA = _ncc_circular(A, A_ref)
+    nccB = _ncc_circular(B, B_ref)
+    nccC = _ncc_circular(C, C_ref)
+    ncc  = (nccA + nccB + nccC) / 3.0
+
+    s_polar = 1.0 - ncc
+    score = w_shape * float(s_shape) + w_polar * float(s_polar)
+
+    # print(f"NCC: A={nccA:.3f} B={nccB:.3f} C={nccC:.3f}  mean={ncc:.3f}  shape={s_shape:.4f}  score={score:.3f}")
+    return float(score), float(ncc), float(s_shape)
+
+
+
+
+@lru_cache(maxsize=16)
+def _load_ref_contour(name: str) -> np.ndarray:
+    path = f"./ref_contours/{name}.png"
+    ref_gray = cv.imread(path, cv.IMREAD_GRAYSCALE)
+    if ref_gray is None:
+        raise FileNotFoundError(f"Referentie '{name}' niet gevonden op {path}")
+    # Gebruik dezelfde finder zodat ref==live consistent is:
+    return _find_outer_contour_detailed(ref_gray)
+
+
+
+def _list_ref_names() -> list[str]:
+    REF_DIR.mkdir(parents=True, exist_ok=True)
+    names = []
+    for p in glob(str(REF_DIR / "*.png")) + glob(str(REF_DIR / "*.jpg")) + glob(str(REF_DIR / "*.jpeg")):
+        names.append(Path(p).stem)
+    # unieke, stabiele volgorde
+    return sorted(list(dict.fromkeys(names)))
+
+
+def _find_outer_contour_detailed(
+    gray: np.ndarray,
+    *,
+    focus_center: bool = True,
+    min_area_frac: float = 0.001,
+    max_area_frac: float = 0.80,
+    simplify_eps_frac: float = 0.0000000000001,
+    debug_name: str | None = None
+) -> np.ndarray:
+    """
+    Super-gedetailleerde naafcontour:
+    - gebruikt Canny + Scharr
+    - minimale smoothing
+    - geen vereenvoudiging
+    - behoudt elk tandje en boutrandje
+    """
+    if gray.ndim != 2:
+        raise ValueError("Grayscale beeld verwacht (1 kanaal).")
+
+    H, W = gray.shape[:2]
+    img_area = float(W * H)
+
+    # --- Minder smoothing, meer detail ---
+    g = cv.GaussianBlur(gray, (3,3), 0)
+    clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    g = clahe.apply(g)
+
+    # --- Scharr + Canny combineren ---
+    gx = cv.Scharr(g, cv.CV_32F, 1, 0)
+    gy = cv.Scharr(g, cv.CV_32F, 0, 1)
+    mag = cv.magnitude(gx, gy)
+    mag = cv.convertScaleAbs(mag)
+    edges_scharr = cv.Canny(mag, 50, 200, apertureSize=3, L2gradient=True)
+
+    edges_adapt = cv.adaptiveThreshold(
+        g, 255,
+        cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv.THRESH_BINARY, 11, -2
+    )
+
+    edges = cv.bitwise_or(edges_scharr, edges_adapt)
+
+    # --- Minimalistische morfologie (sluit minuscule gaten) ---
+    k = cv.getStructuringElement(cv.MORPH_ELLIPSE, (2, 2))
+    edges = cv.morphologyEx(edges, cv.MORPH_CLOSE, k, iterations=1)
+
+    # --- Contouren zoeken ---
+    cnts, _ = cv.findContours(edges, cv.RETR_TREE, cv.CHAIN_APPROX_NONE)
+    if not cnts:
+        raise ValueError("Geen contouren gevonden")
+
+    # --- Centrumfilter (naaf in midden) ---
+    cx, cy = W * 0.5, H * 0.5
+    kept = []
+    for c in cnts:
+        a = cv.contourArea(c)
+        if a < (min_area_frac * img_area) or a > (max_area_frac * img_area):
+            continue
+        M = cv.moments(c)
+        if M["m00"] == 0:
+            continue
+        x = M["m10"]/M["m00"]; y = M["m01"]/M["m00"]
+        if focus_center and np.hypot((x-cx)/W, (y-cy)/H) > 0.5:
+            continue
+        kept.append(c)
+
+    if not kept:
+        kept = [max(cnts, key=cv.contourArea)]
+
+    # --- Combineer alles naar één contour via mask ---
+    mask = np.zeros_like(gray, np.uint8)
+    cv.drawContours(mask, kept, -1, 255, 1)
+    ext, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
+    if not ext:
+        raise ValueError("Kon geen buitencontour uit masker halen")
+    combined = max(ext, key=cv.contourArea)
+
+    # --- Debug ---
+    if debug_name:
+        dbg = cv.cvtColor(gray, cv.COLOR_GRAY2BGR)
+        cv.drawContours(dbg, [combined], -1, (0, 255, 0), 1, lineType=cv.LINE_AA)
+        os.makedirs("debug_contours", exist_ok=True)
+        cv.imwrite(f"debug_contours/{debug_name}_maxdetail.png", dbg)
+
+    return combined
+
+
+
+
+def _as_contour_pts(arr: np.ndarray) -> np.ndarray:
+    """
+    Normaliseer naar shape (N,1,2) float32/int32 voor cv.moments / cv.contourArea.
+    """
+    a = np.asarray(arr)
+    if a.ndim == 3 and a.shape[1] == 1 and a.shape[2] == 2:
+        pass
+    elif a.ndim == 2 and a.shape[1] == 2:
+        a = a.reshape(-1, 1, 2)
+    else:
+        raise ValueError(f"Ongeldige contourvorm: shape={a.shape}, dtype={a.dtype}")
+    # moments werkt met float32 of int32
+    if a.dtype not in (np.float32, np.int32):
+        a = a.astype(np.float32, copy=False)
+    return a
+
+def _centroid(cnt: np.ndarray) -> Tuple[float, float]:
+    try:
+        pts = _as_contour_pts(cnt)
+        M = cv.moments(pts)
+    except Exception:
+        # fallback: probeer als binaire image
+        img = np.asarray(cnt)
+        if img.ndim == 2:
+            M = cv.moments(img.astype(np.uint8))
+        else:
+            raise
+
+    if abs(M.get("m00", 0.0)) < 1e-6:
+        pts2 = pts.reshape(-1, 2)
+        x = float(np.mean(pts2[:, 0] if len(pts2) else [0]))
+        y = float(np.mean(pts2[:, 1] if len(pts2) else [0]))
+        return x, y
+    return float(M["m10"] / M["m00"]), float(M["m01"] / M["m00"])
+
+def _mask_from_contour(cnt: np.ndarray, size: Tuple[int,int]) -> np.ndarray:
+    m = np.zeros(size, np.uint8)
+    cv.drawContours(m, [cnt], -1, 255, thickness=-1)
+    return m
+
+def _align_for_overlap(
+    ref_contours: list[np.ndarray] | np.ndarray,
+    live_contours: list[np.ndarray] | np.ndarray,
+    out_size: int = 768
+) -> tuple[np.ndarray, np.ndarray]:
+    """Rudimentaire schaal/shift-align op basis van area & centroid, daarna masks vullen."""
+    def _as_list(c):
+        return c if isinstance(c, list) else [c]
+
+    ref_list = _as_list(ref_contours)
+    live_list = _as_list(live_contours)
+
+    # bbox/area/centroid op gevulde mask-resolutie
+    # neem canvas groot genoeg om detail te behouden
+    W = H = out_size
+
+    # maak ruwe maskers om area/centroid te schatten (op 'native' schaal)
+    # eerst maximale extents inschatten
+    def _extents(contours):
+        xs, ys = [], []
+        for c in contours:
+            pts = c.reshape(-1, 2)
+            xs.append(pts[:, 0]); ys.append(pts[:, 1])
+        xs = np.concatenate(xs); ys = np.concatenate(ys)
+        return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+
+    rx1, ry1, rx2, ry2 = _extents(ref_list)
+    lx1, ly1, lx2, ly2 = _extents(live_list)
+
+    # schaal factor via (gevulde) area verhouding
+    ref_area = sum(max(cv.contourArea(c), 1.0) for c in ref_list)
+    live_area = sum(max(cv.contourArea(c), 1.0) for c in live_list)
+    scale = float(np.sqrt(ref_area / max(live_area, 1e-6)))
+
+    # schaal live-punten
+    live_scaled = [ (c.astype(np.float32) * scale) for c in live_list ]
+
+    # centroiden
+    def _centroid_list(contours):
+        m = np.zeros((H, W), np.uint8)
+        # voorlopig zonder extra verschuiving tekenen (we verschuiven pas na centroid)
+        # normaliseer naar canvas-doorrekenen: we passen pas shift toe later
+        # om een robuuste centroid te krijgen op punten, gebruik moments van punten:
+        xs, ys = [], []
+        for c in contours:
+            p = c.reshape(-1,2)
+            xs.append(p[:,0]); ys.append(p[:,1])
+        xs = np.concatenate(xs); ys = np.concatenate(ys)
+        return float(xs.mean()), float(ys.mean())
+
+    cxr, cyr = _centroid_list(ref_list)
+    cxl, cyl = _centroid_list(live_scaled)
+
+    shift = np.array([[[cxr - cxl, cyr - cyl]]], dtype=np.float32)
+    live_aligned = [ (c + shift).astype(np.int32) for c in live_scaled ]
+
+    # center beide op canvas
+    # (optioneel: je kan ook normaliseren op basis van ref-centroid → canvasmidden)
+    rcx, rcy = cxr, cyr
+    canv_center = np.array([[[W/2 - rcx, H/2 - rcy]]], np.float32)
+    ref_centered  = [ (c.astype(np.float32) + canv_center).astype(np.int32) for c in ref_list ]
+    live_centered = [ (c.astype(np.float32) + canv_center).astype(np.int32) for c in live_aligned ]
+
+    ref_mask  = _mask_from_contours(ref_centered,  (H, W))
+    live_mask = _mask_from_contours(live_centered, (H, W))
+    return ref_mask, live_mask
+
+def _compute_overlap(ref_mask: np.ndarray, live_mask: np.ndarray) -> float:
+    inter = np.logical_and(ref_mask>0, live_mask>0).sum()
+    uni   = np.logical_or (ref_mask>0, live_mask>0).sum()
+    if uni == 0:
+        return 0.0
+    return float(inter/uni)  # IoU
+
+def fit_radius(cnt: np.ndarray) -> float:
+    (x, y), r = cv.minEnclosingCircle(cnt.astype(np.float32))
+    return float(r)
+
+# ---------- Endpoint ----------
+CAPTURE_DIR = Path("./captures")
+CAPTURE_DIR.mkdir(exist_ok=True)
+
+_last_frame_bgr = None  # wordt elders (bijv. in infer_loop) steeds geüpdatet
+
+def update_last_frame(frame):
+    global _last_frame_bgr
+    _last_frame_bgr = frame.copy()
+
+@router.post("/api/capture")
+async def api_capture():
+    """Slaat het laatste frame op zonder overlays/maskers/contours."""
+    global _last_frame_bgr
+    if _last_frame_bgr is None:
+        raise HTTPException(400, "Geen frame beschikbaar om op te slaan")
+
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    out_path = CAPTURE_DIR / f"capture_{ts}.jpg"
+    cv2.imwrite(str(out_path), _last_frame_bgr)
+    return {"ok": True, "path": str(out_path)}
+
+
+@router.post("/api/contour-match")
+async def contour_match(
+    file: UploadFile = File(...),
+    ref_name: str = Form("", description="Optioneel: type/prefix (bv. T8, T13). Leeg = alle types"),
+    score_thresh: float = Form(0.02, description="Max. matchShapes score (lager is beter)"),
+    iou_thresh: float = Form(0.80, description="Min. IoU na align"),
+    roi: str = Form("", description="Optioneel ROI 'x,y,w,h' om het gat te zoeken")
+):
+    """
+    Vergelijk live 'gat'-contour met ÓF:
+      - alle ref-afbeeldingen die bij 'ref_name' (prefix) horen,
+      - ÓF (als ref_name leeg is) de best scorende variant in élk type,
+        en kies vervolgens de globale winnaar.
+    """
+    # 1) Live input lezen
+    try:
+        bytes_ = await file.read()
+        gray = _read_image(bytes_)
+    except Exception as e:
+        raise HTTPException(400, f"Afbeelding ongeldig: {e}")
+
+    # 2) ROI (optioneel)
+    parsed_roi = None
+    if roi:
+        try:
+            x, y, w, h = map(int, roi.split(","))
+            parsed_roi = (x, y, w, h)
+        except Exception:
+            raise HTTPException(400, "ROI formaat moet 'x,y,w,h' zijn")
+
+    # 3) Live contour vinden
+    try:
+        cnt_live = _find_outer_contour_detailed(gray, debug_name="live_input")
+        _draw_debug_contour(gray, cnt_live, "live_input")
+        _, live_sigs = _live_features(gray, cnt_live)
+    except Exception as e:
+        raise HTTPException(422, f"Kon live gat-contour niet bepalen: {e}")
+
+    # 4) Kandidaten bepalen (één type of alle types)
+    if ref_name:
+        type_keys = [ref_name]  # alleen dit type/prefix
+    else:
+        type_keys = _list_ref_type_keys()
+        if not type_keys:
+            raise HTTPException(404, "Geen referentiebestanden gevonden in ./ref_contours")
+
+    per_type_best = []   # beste per type: {type_key, ref_file, score, iou, center_dist, match}
+    global_best = None   # overall beste (laagste score)
+
+    for tkey in type_keys:
+        candidates = _iter_ref_files(tkey)
+        if not candidates:
+            # geen files voor dit type → sla type over
+            continue
+
+        best_for_type = None
+        for ref_path in candidates:
+            try:
+                ref_feats = _load_ref_features(str(ref_path))
+            except Exception:
+                continue
+
+            cnt_ref = ref_feats["cnt"]
+
+            # gecombineerde score (lager = beter), ncc (hoger = beter), shape-info
+            score, ncc, s_shape = _combined_score(cnt_ref, cnt_live, ref_feats, live_sigs)
+
+            # extra debug: IoU na simpele align + centroidafstand
+            ref_mask, live_mask = _align_for_overlap(cnt_ref, cnt_live, out_size=768)
+            iou = _compute_overlap(ref_mask, live_mask)
+
+            # centroidafstand (alleen info)
+            M1 = cv.moments(cnt_ref);
+            M2 = cv.moments(cnt_live)
+            cx1 = M1["m10"] / max(M1["m00"], 1e-6);
+            cy1 = M1["m01"] / max(M1["m00"], 1e-6)
+            cx2 = M2["m10"] / max(M2["m00"], 1e-6);
+            cy2 = M2["m01"] / max(M2["m00"], 1e-6)
+            cdist = float(np.hypot(cx1 - cx2, cy1 - cy2))
+
+            rec = {
+                "type_key": tkey,
+                "ref_file": ref_path.name,
+                "score": float(score),  # onze gecombineerde kost (lager = beter)
+                "ncc": float(ncc),  # 0..1 (hoger = beter)
+                "shape": float(s_shape),  # ter debug
+                "iou": float(iou),  # ter debug
+                "center_dist_px": cdist,  # ter debug
+            }
+            if (best_for_type is None) or (rec["score"] < best_for_type["score"]):
+                best_for_type = rec
+
+        if best_for_type:
+            # drempels toepassen voor 'match' boolean
+            best_for_type["match"] = (best_for_type["score"] <= score_thresh) and (best_for_type["iou"] >= iou_thresh)
+            per_type_best.append(best_for_type)
+            if (global_best is None) or (best_for_type["score"] < global_best["score"]):
+                global_best = best_for_type
+
+    if not per_type_best:
+        raise HTTPException(500, "Geen geldige referentiecontouren gevonden/bruikbaar")
+
+    # thresholds (maak desnoods configurabel)
+    SCORE_MAX = float(score_thresh)  # bv. 0.20 als startpunt
+    NCC_MIN = 0.70  # polar correlatie
+    IOU_MIN = 0.60  # IoU alleen informatief/veiligheidsnet
+    MARGIN = 0.18  # #1 moet ≥20% beter zijn dan #2
+
+    per_type_best.sort(key=lambda r: r["score"])
+    global_best = per_type_best[0]
+    second_best = per_type_best[1] if len(per_type_best) > 1 else None
+
+    ok_by_thresh = (global_best["score"] <= SCORE_MAX) and (global_best["ncc"] >= NCC_MIN) and (
+                global_best["iou"] >= IOU_MIN)
+    ok_by_iou = (global_best.get("iou", 0.0) >= IOU_MIN)
+
+    # relatieve marge t.o.v. #2
+    ok_by_margin = True
+    if second_best:
+        rel = (second_best["score"] - global_best["score"]) / max(second_best["score"], 1e-6)
+        ok_by_margin = (rel >= MARGIN)
+
+    # soepele combinatieregel:
+    # - primaire: score & ncc ok EN iou ok
+    # - fallback A: iou heel hoog (≥0.90) EN score < 0.40 (licht ruim)
+    # - fallback B: score is duidelijk #1 (margin) EN ncc ≥ 0.65
+    match_flag = bool(
+        (global_best["score"] <= SCORE_MAX and
+         global_best.get("ncc", 0.0) >= NCC_MIN and
+         ok_by_iou)
+        or
+        (global_best.get("iou", 0.0) >= 0.90 and global_best["score"] <= 0.40)
+        or
+        (ok_by_margin and global_best.get("ncc", 0.0) >= 0.65)
+    )
+
+    global_best["match"] = match_flag
+
+    # 5) Antwoord
+    # Bewaar backward compat: 'best' bevat de globale winnaar;
+    # 'all' bevat alle "beste per type".
+    # thresholds teruggeven helpt voor debuggen aan de UI-kant.
+    return {
+        "ok": True,
+        "best": {
+            "type_key": global_best["type_key"],
+            "ref": global_best["ref_file"],
+            "score": global_best["score"],  # gecombineerde kost
+            "ncc": global_best["ncc"],  # polar correlatie
+            "shape": global_best["shape"],  # matchShapes
+            "iou": global_best["iou"],
+            "center_dist_px": global_best["center_dist_px"],
+            "match": global_best["match"],
+        },
+        "all": per_type_best,
+        "thresholds": {
+            "score_max": SCORE_MAX,
+            "ncc_min": NCC_MIN,
+            "iou_min": IOU_MIN,
+            "margin_min": MARGIN
+        },
+    }
+
+
+DEBUG_DIR = "./debug_contours"
+os.makedirs(DEBUG_DIR, exist_ok=True)
+
+
+@app.post("/api/contours/ref/upload")
+async def upload_ref_contour(
+    file: UploadFile = File(...),
+    name: str | None = Form(None)   # optioneel: gewenste naam zonder extensie (bv. "T9")
+):
+    REF_DIR.mkdir(parents=True, exist_ok=True)
+
+    # valideer extensie
+    orig_ext = Path(file.filename).suffix.lower()
+    if orig_ext not in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}:
+        raise HTTPException(status_code=400, detail="Ongeldige extensie")
+
+    # bepaal bestandsnaam
+    stem = (name or Path(file.filename).stem).strip()
+    if not stem:
+        raise HTTPException(status_code=400, detail="Naam ontbreekt")
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]", "_", stem)
+
+    out_path = REF_DIR / f"{safe_stem}{orig_ext}"
+
+    # schrijf bestand
+    data = await file.read()
+    out_path.write_bytes(data)
+
+    # klaar
+    return {
+        "ok": True,
+        "filename": out_path.name,
+        "path": str(out_path.resolve()),
+        "ref_name": safe_stem
+    }
 # ------------------------------
 # Collections + Products JSON storage
 # ------------------------------
@@ -2274,7 +3066,7 @@ async def api_rejects_delete(payload: RejectsDeleteIn):
           pass
     return {"ok": True, "deleted": deleted}
 
-
+app.include_router(router)
 # ------------------------------
 # Lifecycle hook
 # ------------------------------
@@ -2287,9 +3079,9 @@ async def _on_startup():
         _infer_thread = threading.Thread(target=infer_loop, daemon=True)
         _infer_thread.start()
 
-    # if _cv2_thread is None or not _cv2_thread.is_alive():
-    #     _cv2_thread = threading.Thread(target=cv2_loop, daemon=True)
-    #     _cv2_thread.start()
+    if _cv2_thread is None or not _cv2_thread.is_alive():
+         _cv2_thread = threading.Thread(target=cv2_loop, daemon=True)
+         _cv2_thread.start()
 
 
 # ------------------------------

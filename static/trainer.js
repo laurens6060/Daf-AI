@@ -36,11 +36,11 @@ const els = {
   modelSel: document.getElementById('modelSel'),
   exportDir: document.getElementById('exportDir'),
   resumeSel: document.getElementById('resumeSel'),
-  loadResume: document.getElementById('loadResumeBtn')
+  loadResume: document.getElementById('loadResumeBtn'),
+  carousel: document.getElementById('trainerCarousel'),
+  carouselInner: document.getElementById('carouselInner'),
+  carouselIndicators: document.getElementById('carouselIndicators'),
 };
-
-
-
 
 // ============ Tool mode ============
 const tool = { mode: 'box' }; // 'box' | 'mask'
@@ -68,82 +68,6 @@ function refreshKpis() {
   els.kPos.textContent = p; els.kNeg.textContent = n; els.kImgs.textContent = imgs;
 }
 
-// Stable key voor een afbeelding
-//async function imageKeyFromSource({ file, url }) {
-//  // 1) Lokaal bestand ⇒ probeer SHA-256; zo niet, val terug op een snelle hash
-//  if (file) {
-//    try {
-//      if (crypto?.subtle?.digest) {
-//        const buf = await file.arrayBuffer();
-//        const digest = await crypto.subtle.digest('SHA-256', buf);
-//        const hex = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
-//        return 'sha256:' + hex;
-//      }
-//      // Fallback: hash eerste 1MB + grootte (stabiel genoeg voor onze sleutel)
-//      const chunk = await file.slice(0, 1_000_000).arrayBuffer();
-//      let h = 5381;                       // djb2
-//      for (const x of new Uint8Array(chunk)) h = ((h << 5) + h) ^ x;
-//      return `djb2:${(h >>> 0).toString(16)}:${file.size}`;
-//    } catch (e) {
-//      console.warn('imageKeyFromSource(): fallback key gebruikt', e);
-//      return `name:${file.name}|size:${file.size}|mtime:${file.lastModified}`;
-//    }
-//  }
-//  // 2) Voor uploads/static: gebruik de URL als key
-//  return url; // bv. "/uploads/trainer/....jpg" of "/static/..."
-//}
-
-
-// Normaliseren <-> denormaliseren helpers
-const normBox = (b, w, h) => ({ x: (b.x / w), y: (b.y / h), w: (b.w / w), h: (b.h / h), label: b.label });
-const denormBox = (b01, w, h) => ({ x: b01.x * w, y: b01.y * h, w: b01.w * w, h: b01.h * h, label: b01.label });
-const normPoly = (poly, w, h) => poly.map(p => ({ x: (p.x / w), y: (p.y / h) }));
-const denormPoly = (poly01, w, h) => poly01.map(p => ({ x: p.x * w, y: p.y * h }));
-
-// Debounce
-function debounce(fn, ms = 300) {
-  let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
-}
-
-//async function saveAnnotations(item) {
-//  if (!item.imageKey) { console.warn('saveAnnotations: geen imageKey', item.name); return; }
-//  const body = {
-//    key: item.imageKey,
-//    name: item.name || '',
-//    w: item.w, h: item.h,
-//    boxes01: item.boxes.map(b => normBox(b, item.w, item.h)),
-//    masks01: (item.masks || []).map(poly => normPoly(poly, item.w, item.h)),
-//  };
-//  const r = await fetch('/api/ann', {
-//    method: 'POST',
-//    headers: { 'Content-Type': 'application/json' },
-//    body: JSON.stringify(body)
-//  });
-//  if (!r.ok) {
-//    console.warn('saveAnnotations() failed', r.status, await r.text().catch(() => ''));
-//  }
-//}
-//
-//
-//const saveAnnotationsDebounced = debounce(saveAnnotations, 400);
-//
-//async function restoreAnnotations(item) {
-//  if (!item.imageKey) return;
-//  try {
-//    const r = await fetch('/api/ann?key=' + encodeURIComponent(item.imageKey));
-//    if (!r.ok) return; // geen eerdere annotaties
-//    const data = await r.json();
-//    // Alleen als dimensies matchen (anders herberekenen of overslaan)
-//    if (data.w && data.h && item.w && item.h) {
-//      item.boxes = (data.boxes01 || []).map(b01 => denormBox(b01, item.w, item.h));
-//      item.masks = (data.masks01 || []).map(poly01 => denormPoly(poly01, item.w, item.h));
-//      drawItem(item); refreshKpis();
-//      log(`Hersteld: ${item.boxes.length} boxes, ${(item.masks?.length || 0)} masks (${item.name})`);
-//    }
-//  } catch (e) { /* negeren */ }
-//}
-
-
 // ============ Geometry ============
 // Eenvoudige IoU (Intersection over Union) voor rechthoeken in (x,y,w,h) vorm.
 // Handig indien je overlappende boxes wilt dedupliceren of quality checks wilt doen.
@@ -158,10 +82,13 @@ function iou(a, b) {
 // ============ UI: kaart maken ============
 // Voegt een image-kaart toe met een IMG en een overlay CANVAS waar je boxes kunt tekenen.
 async function addImageCard(fileName, imgUrl, opts = {}) {
-  const col = document.createElement('div'); col.className = 'col-12 col-md-6';
-  const card = document.createElement('div'); card.className = 'image-card shadow-sm';
+  // slide + kaart
+  const slide = document.createElement('div');
+  slide.className = 'carousel-item' + (state.items.length === 0 ? ' active' : '');
 
-  const header = document.createElement('div'); header.className = 'd-flex justify-content-between align-items-center p-2 border-bottom bg-light';
+  const card = document.createElement('div'); card.className = 'image-card shadow-sm';
+  const header = document.createElement('div');
+  header.className = 'd-flex justify-content-between align-items-center p-2 border-bottom bg-light';
   header.innerHTML = `<strong class="text-truncate">${fileName}</strong>`;
 
   const canvasWrap = document.createElement('div'); canvasWrap.className = 'canvas-wrap';
@@ -170,22 +97,30 @@ async function addImageCard(fileName, imgUrl, opts = {}) {
 
   canvasWrap.appendChild(img); canvasWrap.appendChild(canvas);
   card.appendChild(header); card.appendChild(canvasWrap);
-  col.appendChild(card);
-  els.thumbs.prepend(col);
+  slide.appendChild(card);
+  els.carouselInner.appendChild(slide);
 
-  // ★ imageKey vooraf bepalen (file → sha256, anders URL)
-  //const imageKey = await imageKeyFromSource({ file: opts.file || null, url: imgUrl });
+  // indicator-dot toevoegen
+  const idx = state.items.length;
+  const dot = document.createElement('button');
+  dot.type = 'button';
+  dot.setAttribute('data-bs-target', '#trainerCarousel');
+  dot.setAttribute('data-bs-slide-to', String(idx));
+  dot.setAttribute('aria-label', `Slide ${idx + 1}`);
+  if (idx === 0) { dot.className = 'active'; dot.setAttribute('aria-current', 'true'); }
+  els.carouselIndicators.appendChild(dot);
 
-  const item = { name: fileName, imgEl: img, boxes: [], masks: [], tempPoly: [], canvas, ctx, w: 0, h: 0, };
+  // item in state
+  const item = { name: fileName, imgEl: img, boxes: [], masks: [], tempPoly: [], canvas, ctx, w: 0, h: 0 };
   state.items.push(item);
 
   img.onload = async () => {
     item.w = img.naturalWidth; item.h = img.naturalHeight;
     canvas.width = item.w; canvas.height = item.h;
     drawItem(item); refreshKpis();
-    // ★ probeer bestaande annotaties te herstellen
-    //await restoreAnnotations(item);
+    // restoreAnnotations(item) — indien je die gebruikt
   };
+
 
   let drawing = false, start = null, cur = null;
 
@@ -204,7 +139,6 @@ async function addImageCard(fileName, imgUrl, opts = {}) {
     } else {
       item.tempPoly.push(p);
       drawItem(item);
-      //saveAnnotationsDebounced(item);            // ★ autosave
     }
   });
 
@@ -225,14 +159,6 @@ async function addImageCard(fileName, imgUrl, opts = {}) {
       item.boxes.push({ x, y, w, h, label: isNeg ? 'neg' : 'pos' });
       drawItem(item); refreshKpis();
       log(`${isNeg ? '- Negatieve' : '+ Positieve'} box toegevoegd (${fileName})`);
-      try {
-        //console.log('[trainer] saveAnnotations (direct) for', item.name, item.imageKey);
-        //saveAnnotations(item);  // tijdelijk zonder debounce
-        //console.log('[trainer] saveAnnotations DONE');
-      } catch (e) {
-        //console.error('[trainer] saveAnnotations error', e);
-      }
-
     }
   });
 
@@ -242,7 +168,6 @@ async function addImageCard(fileName, imgUrl, opts = {}) {
     item.masks.push(item.tempPoly.slice());
     item.tempPoly = [];
     drawItem(item); refreshKpis(); log(`+ Mask toegevoegd (${fileName})`);
-    //saveAnnotationsDebounced(item);              // ★ autosave
   });
 
   // Rechtermuisklik = undo
@@ -255,12 +180,10 @@ async function addImageCard(fileName, imgUrl, opts = {}) {
       if (item.boxes.length) { item.boxes.pop(); log('− Laatste box verwijderd (' + fileName + ')'); }
     }
     drawItem(item); refreshKpis();
-    //saveAnnotationsDebounced(item);              // ★ autosave
   });
 
   return item;
 }
-
 
 document.getElementById('maskUndoPoint')?.addEventListener('click', () => {
   // undo geldt op laatst aangemaakte/gewijzigde card; hier simpel: op elk item tempPoly proberen
@@ -268,7 +191,6 @@ document.getElementById('maskUndoPoint')?.addEventListener('click', () => {
     if (it.tempPoly?.length) {
       it.tempPoly.pop();
       drawItem(it);
-      //saveAnnotationsDebounced(it);
       break;
     }
   }
@@ -282,7 +204,6 @@ document.getElementById('maskClose')?.addEventListener('click', () => {
       drawItem(it);
       refreshKpis();
       log('+ Mask toegevoegd (' + it.name + ')');
-      //saveAnnotationsDebounced(it);
       break;
     }
   }
@@ -295,7 +216,6 @@ document.getElementById('maskUndoPoly')?.addEventListener('click', () => {
       drawItem(it);
       refreshKpis();
       log('− Laatste mask verwijderd (' + it.name + ')');
-      //saveAnnotationsDebounced(it);
       break;
     }
   }
@@ -373,8 +293,6 @@ function drawItem(item, start = null, cur = null) {
 // Exporteert de huidige annotaties naar YOLO-indeling en start /api/train met FormData.
 async function exportToYOLOAndTrain() {
   if (!state.items.length) { alert('Voeg eerst afbeeldingen toe.'); return; }
-
-  await Promise.all(state.items.map(it => saveAnnotations(it).catch(() => { })));
 
   const clsName = (els.className.value || 'object').trim() || 'object';
   const baseModelKeyRaw = els.modelSel?.value || null;
@@ -698,10 +616,9 @@ els.pick.onclick = () => els.file.click();
 els.file.onchange = async (e) => {
   for (const f of e.target.files) {
     const url = URL.createObjectURL(f);
-    await addImageCard(f.name, url, { file: f });   // ★ file mee → sha256 sleutel
+    addImageCard(f.name, url);
   }
 };
-
 
 // Voorbeeldafbeeldingen toevoegen (drie vaste samples)
 els.sample.onclick = async () => {
@@ -715,17 +632,19 @@ els.sample.onclick = async () => {
   ];
   let i = 1;
   for (const u of urls) {
-    await addImageCard(`voorbeeld_${i++}.png`, u);
+    addImageCard(`voorbeeld_${i++}.png`, u);
   }
 };
 
 // Alles leegmaken (UI en state)
 els.clear.onclick = () => {
-  els.thumbs.querySelectorAll('.col-12').forEach(card => card.remove());
+  els.carouselInner.innerHTML = '';
+  els.carouselIndicators.innerHTML = '';
   state.items = [];
   refreshKpis();
-  log('Canvas geleegd.');
+  log('Carousel geleegd.');
 };
+
 
 // Start export+train, en polling annuleren
 els.exportTrain.onclick = exportToYOLOAndTrain;
@@ -771,18 +690,6 @@ async function loadConfigAndModels() {
     log(`Kon getrainde modellen niet ophalen: ${e}`);
   }
 }
-
-window.addEventListener('beforeunload', () => {
-  state.items.forEach(it => navigator.sendBeacon(
-    '/api/ann',
-    new Blob([JSON.stringify({
-      key: it.imageKey, name: it.name || '', w: it.w, h: it.h,
-      boxes01: it.boxes.map(b => normBox(b, it.w, it.h)),
-      masks01: (it.masks || []).map(poly => normPoly(poly, it.w, it.h)),
-    })], { type: 'application/json' })
-  ));
-});
-
 
 // Laad een gekozen checkpoint direct in de live viewer (zonder trainen)
 // Handig om even snel te testen met /api/model/load
